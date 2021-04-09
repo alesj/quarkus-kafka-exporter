@@ -27,7 +27,7 @@
         <tar.long.file.mode>gnu</tar.long.file.mode>
         
         <!-- Quarkus Version -->
-        <quarkus.version>1.10.2.Final</quarkus.version>
+        <quarkus.version>1.13.1.Final</quarkus.version>
         <!-- Prometheus Version -->
         <prometheus.version>0.10.0</prometheus.version>
 
@@ -58,7 +58,7 @@
             <!-- Prometheus -->
             <dependency>
                 <groupId>io.prometheus</groupId>
-                <artifactId>simpleclient_servlet</artifactId>
+                <artifactId>simpleclient_vertx</artifactId>
                 <version>${prometheus.version}</version>
             </dependency>
 
