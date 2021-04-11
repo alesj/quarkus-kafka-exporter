@@ -26,8 +26,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
-import java.util.concurrent.CountDownLatch;
 import java.util.function.Function;
 
 /**
@@ -48,7 +46,7 @@ public class KafkaCollector extends Collector {
     @Inject
     Admin admin;
 
-    private static <T> CompletionStage<T> toCS(KafkaFuture<T> kf) {
+    private static <T> CompletableFuture<T> toCF(KafkaFuture<T> kf) {
         CompletableFuture<T> cf = new CompletableFuture<>();
         kf.whenComplete((v, t) -> {
             if (t != null) {
@@ -73,46 +71,36 @@ public class KafkaCollector extends Collector {
         return name;
     }
 
-    private <T> void collectSingle(CountDownLatch latch, List<MetricFamilySamples> mfs, String fqn, String help, CompletionStage<T> cs, Function<T, Number> fn) {
-        collectList(latch, mfs, fqn, cs, r -> {
+    private <T> void collectSingle(List<CompletableFuture<?>> tasks, List<MetricFamilySamples> mfs, String fqn, String help, CompletableFuture<T> cf, Function<T, Number> fn) {
+        collectList(tasks, mfs, fqn, cf, r -> {
             Number value = fn.apply(r);
             return new GaugeMetricFamily(fqn, help, value.doubleValue());
         });
     }
 
-    private <T> void collectList(CountDownLatch latch, List<MetricFamilySamples> mfs, String fqn, CompletionStage<T> cs, Function<T, MetricFamilySamples> fn) {
-        cs.whenComplete((r, t) -> {
+    private <T> void collectList(List<CompletableFuture<?>> tasks, List<MetricFamilySamples> mfs, String fqn, CompletableFuture<T> cf, Function<T, MetricFamilySamples> fn) {
+        CompletableFuture<T> task = cf.whenComplete((r, t) -> {
             if (t != null) {
                 log.error("Error getting metrics for '{}'", fqn, t);
             } else {
                 MetricFamilySamples sample = fn.apply(r);
                 mfs.add(sample);
             }
-            latch.countDown();
         });
-    }
-
-    private void await(CountDownLatch latch) {
-        try {
-            latch.await();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IllegalStateException(e);
-        }
+        tasks.add(task);
     }
 
     @Override
     public List<MetricFamilySamples> collect() {
-        int N = 4; // number of all metrics
+        List<CompletableFuture<?>> futures = new ArrayList<>();
 
-        CountDownLatch latch = new CountDownLatch(N);
-        List<MetricFamilySamples> mfs = new ArrayList<>(N);
-        collectSingle(latch, mfs, fqn(null, "brokers"), "Number of Brokers in the Kafka Cluster.", toCS(admin.describeCluster().nodes()), Collection::size);
+        List<MetricFamilySamples> mfs = new ArrayList<>();
+        collectSingle(futures, mfs, fqn(null, "brokers"), "Number of Brokers in the Kafka Cluster.", toCF(admin.describeCluster().nodes()), Collection::size);
 
-        CompletionStage<Set<String>> topicsCS = toCS(admin.listTopics().names());
+        CompletableFuture<Set<String>> topicsCS = toCF(admin.listTopics().names());
 
-        CompletionStage<Map<String, TopicDescription>> descCS = topicsCS.thenCompose(topics -> toCS(admin.describeTopics(topics).all()));
-        collectList(latch, mfs, fqn("topic", "partitions"), descCS, map -> {
+        CompletableFuture<Map<String, TopicDescription>> descCS = topicsCS.thenCompose(topics -> toCF(admin.describeTopics(topics).all()));
+        collectList(futures, mfs, fqn("topic", "partitions"), descCS, map -> {
             GaugeMetricFamily topics = new GaugeMetricFamily(fqn("topic", "partitions"), "Number of partitions for this Topic", Collections.singletonList("topic"));
             for (Map.Entry<String, TopicDescription> entry : map.entrySet()) {
                 String topic = entry.getKey();
@@ -123,24 +111,25 @@ public class KafkaCollector extends Collector {
             return topics;
         });
 
-        offsets(latch, mfs, fqn("topic", "partition_current_offset"), "Current Offset of a Broker at Topic/Partition", descCS, OffsetSpec.latest());
-        offsets(latch, mfs, fqn("topic", "partition_oldest_offset"), "Oldest Offset of a Broker at Topic/Partition", descCS, OffsetSpec.earliest());
+        offsets(futures, mfs, fqn("topic", "partition_current_offset"), "Current Offset of a Broker at Topic/Partition", descCS, OffsetSpec.latest());
+        offsets(futures, mfs, fqn("topic", "partition_oldest_offset"), "Oldest Offset of a Broker at Topic/Partition", descCS, OffsetSpec.earliest());
 
-        await(latch);
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+
         return mfs;
     }
 
-    private void offsets(CountDownLatch latch, List<MetricFamilySamples> mfs, String fqn, String help, CompletionStage<Map<String, TopicDescription>> descCS, OffsetSpec spec) {
-        CompletionStage<Map<TopicPartition, ListOffsetsResult.ListOffsetsResultInfo>> offsetCS = descCS.thenCompose(map -> {
+    private void offsets(List<CompletableFuture<?>> futures, List<MetricFamilySamples> mfs, String fqn, String help, CompletableFuture<Map<String, TopicDescription>> descCS, OffsetSpec spec) {
+        CompletableFuture<Map<TopicPartition, ListOffsetsResult.ListOffsetsResultInfo>> offsetCS = descCS.thenCompose(map -> {
             Map<TopicPartition, OffsetSpec> currentMap = new HashMap<>();
             for (TopicDescription td : map.values()) {
                 for (TopicPartitionInfo tpi : td.partitions()) {
                     currentMap.put(new TopicPartition(td.name(), tpi.partition()), spec);
                 }
             }
-            return toCS(admin.listOffsets(currentMap).all());
+            return toCF(admin.listOffsets(currentMap).all());
         });
-        collectList(latch, mfs, fqn, offsetCS, map -> {
+        collectList(futures, mfs, fqn, offsetCS, map -> {
             GaugeMetricFamily partitions = new GaugeMetricFamily(fqn, help, Arrays.asList("topic", "partition"));
             for (Map.Entry<TopicPartition, ListOffsetsResult.ListOffsetsResultInfo> offsetEntry : map.entrySet()) {
                 Number offset = offsetEntry.getValue().offset();
