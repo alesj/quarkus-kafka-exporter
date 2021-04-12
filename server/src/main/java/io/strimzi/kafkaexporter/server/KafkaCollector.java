@@ -5,6 +5,7 @@ import io.prometheus.client.GaugeMetricFamily;
 import io.quarkus.runtime.StartupEvent;
 import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.ListOffsetsResult;
+import org.apache.kafka.clients.admin.ListTopicsOptions;
 import org.apache.kafka.clients.admin.OffsetSpec;
 import org.apache.kafka.clients.admin.TopicDescription;
 import org.apache.kafka.common.KafkaFuture;
@@ -27,6 +28,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * @author Ales Justin
@@ -42,6 +45,9 @@ public class KafkaCollector extends Collector implements Collector.Describable {
 
     @ConfigProperty(name = "namespace", defaultValue = "kafka")
     String namespace;
+
+    @ConfigProperty(name = "topic.filter", defaultValue = ".*")
+    Pattern topicFilter;
 
     @Inject
     Admin admin;
@@ -69,6 +75,10 @@ public class KafkaCollector extends Collector implements Collector.Describable {
             return namespace + "_" + name;
         }
         return name;
+    }
+
+    private Collection<String> filterTopics(Collection<String> topics) {
+        return topics.stream().filter(s -> topicFilter.matcher(s).matches()).collect(Collectors.toSet());
     }
 
     private <T> void collectSingle(List<CompletableFuture<?>> tasks, List<MetricFamilySamples> mfs, String fqn, String help, CompletableFuture<T> cf, Function<T, Number> fn) {
@@ -104,9 +114,9 @@ public class KafkaCollector extends Collector implements Collector.Describable {
         List<MetricFamilySamples> mfs = new ArrayList<>();
         collectSingle(futures, mfs, fqn(null, "brokers"), "Number of Brokers in the Kafka Cluster.", toCF(admin.describeCluster().nodes()), Collection::size);
 
-        CompletableFuture<Set<String>> topicsCS = toCF(admin.listTopics().names());
+        CompletableFuture<Set<String>> topicsCS = toCF(admin.listTopics(new ListTopicsOptions().listInternal(true)).names());
 
-        CompletableFuture<Map<String, TopicDescription>> descCS = topicsCS.thenCompose(topics -> toCF(admin.describeTopics(topics).all()));
+        CompletableFuture<Map<String, TopicDescription>> descCS = topicsCS.thenCompose(topics -> toCF(admin.describeTopics(filterTopics(topics)).all()));
         collectList(futures, mfs, fqn("topic", "partitions"), descCS, map -> {
             GaugeMetricFamily topics = new GaugeMetricFamily(fqn("topic", "partitions"), "Number of partitions for this Topic", Collections.singletonList("topic"));
             for (Map.Entry<String, TopicDescription> entry : map.entrySet()) {
