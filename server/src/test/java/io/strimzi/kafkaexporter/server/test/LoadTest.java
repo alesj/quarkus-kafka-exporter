@@ -9,6 +9,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.event.Level;
 
 import javax.inject.Inject;
 import java.util.concurrent.CountDownLatch;
@@ -35,6 +36,51 @@ public class LoadTest {
         }
     }
 
+    public static void main(String[] args) {
+        LoadTest test = new LoadTest();
+        test.vertx = Vertx.vertx();
+        try {
+            Logging logging = (l, m, t) -> {
+                if (l == Level.INFO) {
+                    System.out.println(m);
+                } else {
+                    System.err.println(m + ":" + t);
+                }
+            };
+            test.executeMetricsRequest(10, logging);
+        } catch (Throwable t) {
+            System.err.println("Error: " + t);
+        } finally {
+            test.vertx.close();
+        }
+    }
+
+    @FunctionalInterface
+    private interface Logging {
+        void log(Level level, String msg, Throwable t);
+    }
+
+    private void executeMetricsRequest(int retries, Logging logging) throws Exception {
+        CountDownLatch latch = new CountDownLatch(retries);
+        WebClient client = WebClient.create(vertx);
+        try {
+            while (retries > 0) {
+                retries--;
+                client.get(9308, "localhost", "/metrics").send(event -> {
+                    if (event.succeeded()) {
+                        logging.log(Level.INFO, "Metrics: \n" + event.result().bodyAsString(), null);
+                    } else {
+                        logging.log(Level.ERROR, "Metrics request failed ...", event.cause());
+                    }
+                    latch.countDown();
+                });
+            }
+            latch.await();
+        } finally {
+            client.close();
+        }
+    }
+
     @BeforeEach
     public void init() {
         Assumptions.assumeTrue(isKafkaRunning());
@@ -45,21 +91,13 @@ public class LoadTest {
     @Test
     public void testLoad() throws Exception {
         Assumptions.assumeTrue(isKafkaRunning());
-
-        CountDownLatch latch = new CountDownLatch(1);
-        WebClient client = WebClient.create(vertx);
-        try {
-            client.get(9308, "localhost", "/metrics").send(event -> {
-                if (event.succeeded()) {
-                    log.info(event.result().bodyAsString());
-                } else {
-                    log.error("Metrics request failed ...", event.cause());
-                }
-                latch.countDown();
-            });
-            latch.await();
-        } finally {
-            client.close();
-        }
+        Logging logging = (l, m, t) -> {
+            if (l == Level.INFO) {
+                log.info(m);
+            } else {
+                log.error(m, t);
+            }
+        };
+        executeMetricsRequest(1, logging);
     }
 }
