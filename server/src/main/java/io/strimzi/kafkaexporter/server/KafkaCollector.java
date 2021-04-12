@@ -32,7 +32,7 @@ import java.util.function.Function;
  * @author Ales Justin
  */
 @ApplicationScoped
-public class KafkaCollector extends Collector {
+public class KafkaCollector extends Collector implements Collector.Describable {
     private static final Logger log = LoggerFactory.getLogger(KafkaCollector.class);
 
     public void init(@Observes StartupEvent event) {
@@ -88,6 +88,13 @@ public class KafkaCollector extends Collector {
             }
         });
         tasks.add(task);
+    }
+
+    @Override
+    public List<MetricFamilySamples> describe() {
+        // we use single Collector, so we should be fine - no collisions
+        // this then allows for lazy Admin init
+        return Collections.emptyList();
     }
 
     @Override
