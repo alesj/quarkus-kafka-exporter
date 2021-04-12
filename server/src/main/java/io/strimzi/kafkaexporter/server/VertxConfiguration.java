@@ -7,6 +7,8 @@ import io.vertx.core.Vertx;
 import io.vertx.core.http.HttpServer;
 import io.vertx.ext.web.Router;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.enterprise.context.ApplicationScoped;
 import javax.enterprise.event.Observes;
@@ -17,6 +19,8 @@ import javax.inject.Inject;
  */
 @ApplicationScoped
 public class VertxConfiguration {
+    private static final Logger log = LoggerFactory.getLogger(VertxConfiguration.class);
+
     @Inject
     Vertx vertx;
 
@@ -38,6 +42,7 @@ public class VertxConfiguration {
         });
 
         server = vertx.createHttpServer().requestHandler(router).listen(httpPort);
+        log.info("Started Vertx http server on port {}", httpPort);
     }
 
     public void destroy(@Observes ShutdownEvent event) {

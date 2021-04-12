@@ -130,10 +130,12 @@ public class KafkaCollector extends Collector {
             return toCF(admin.listOffsets(currentMap).all());
         });
         collectList(futures, mfs, fqn, offsetCS, map -> {
-            GaugeMetricFamily partitions = new GaugeMetricFamily(fqn, help, Arrays.asList("topic", "partition"));
+            GaugeMetricFamily partitions = new GaugeMetricFamily(fqn, help, Arrays.asList("partition", "topic"));
             for (Map.Entry<TopicPartition, ListOffsetsResult.ListOffsetsResultInfo> offsetEntry : map.entrySet()) {
                 Number offset = offsetEntry.getValue().offset();
-                partitions.addMetric(Arrays.asList(offsetEntry.getKey().topic(), String.valueOf(offsetEntry.getKey().partition())), offset.doubleValue());
+                String topic = offsetEntry.getKey().topic();
+                int partition = offsetEntry.getKey().partition();
+                partitions.addMetric(Arrays.asList(String.valueOf(partition), topic), offset.doubleValue());
             }
             return partitions;
         });
