@@ -1,5 +1,7 @@
 package io.strimzi.kafkaexporter.server;
 
+import io.strimzi.kafkaexporter.server.utils.AdminProvider;
+import io.strimzi.kafkaexporter.server.utils.AdminProviderImpl;
 import io.strimzi.kafkaexporter.server.utils.InjectedProperties;
 import io.strimzi.kafkaexporter.server.utils.PropertiesUtil;
 import org.apache.kafka.clients.admin.Admin;
@@ -21,8 +23,8 @@ public class Configuration {
 
     @Produces
     @ApplicationScoped
-    public Admin createAdmin(@InjectedProperties("kafka") Properties properties) {
-        return Admin.create(properties);
+    public AdminProvider createAdmin(@InjectedProperties("kafka") Properties properties) {
+        return new AdminProviderImpl(properties);
     }
 
     public void closeAdmin(@Disposes Admin admin) {

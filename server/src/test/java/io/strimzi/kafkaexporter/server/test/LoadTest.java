@@ -1,6 +1,8 @@
 package io.strimzi.kafkaexporter.server.test;
 
 import io.quarkus.test.junit.QuarkusTest;
+import io.strimzi.kafkaexporter.server.utils.AdminHandle;
+import io.strimzi.kafkaexporter.server.utils.AdminProvider;
 import io.vertx.core.Vertx;
 import io.vertx.ext.web.client.WebClient;
 import org.apache.kafka.clients.admin.Admin;
@@ -22,13 +24,14 @@ public class LoadTest {
     private static final Logger log = LoggerFactory.getLogger(LoadTest.class);
 
     @Inject
-    Admin admin;
+    AdminProvider adminProvider;
 
     @Inject
     Vertx vertx;
 
     private boolean isKafkaRunning() {
-        try {
+        try (AdminHandle adminHandle = adminProvider.getAdminHandle()) {
+            Admin admin = adminHandle.getAdmin();
             admin.listTopics().names().get();
             return true;
         } catch (Throwable ignored) {
