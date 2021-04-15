@@ -14,6 +14,7 @@ import org.apache.kafka.clients.admin.OffsetSpec;
 import org.apache.kafka.clients.admin.TopicDescription;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.common.KafkaFuture;
+import org.apache.kafka.common.Node;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.TopicPartitionInfo;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -140,15 +141,43 @@ public class KafkaCollector extends Collector implements Collector.Describable {
             CompletableFuture<Set<String>> topicsCS = toCF(admin.listTopics(new ListTopicsOptions().listInternal(true)).names());
 
             CompletableFuture<Map<String, TopicDescription>> descCS = topicsCS.thenCompose(topics -> toCF(admin.describeTopics(filterTopics(topics)).all()));
-            collectSingle(futures, mfs, fqn("topic", "partitions"), descCS, map -> {
+            collectList(futures, mfs, fqn("topic", "partitions"), descCS, map -> {
+                if (map.isEmpty()) {
+                    return Collections.emptyList();
+                }
+
                 GaugeMetricFamily topics = new GaugeMetricFamily(fqn("topic", "partitions"), "Number of partitions for this Topic", Collections.singletonList("topic"));
+                List<String> labelNames = Arrays.asList("partition", "topic");
+                GaugeMetricFamily leaders = new GaugeMetricFamily(fqn("topic", "partition_leader"), "Leader Broker ID of this Topic/Partition", labelNames);
+                GaugeMetricFamily nReplicas = new GaugeMetricFamily(fqn("topic", "partition_replicas"), "Number of Replicas for this Topic/Partition", labelNames);
+                GaugeMetricFamily nIsrs = new GaugeMetricFamily(fqn("topic", "partition_in_sync_replica"), "Number of In-Sync Replicas for this Topic/Partition", labelNames);
+                GaugeMetricFamily preferred = new GaugeMetricFamily(fqn("topic", "partition_leader_is_preferred"), "1 if Topic/Partition is using the Preferred Broker", labelNames);
+                GaugeMetricFamily under = new GaugeMetricFamily(fqn("topic", "partition_under_replicated_partition"), "1 if Topic/Partition is under Replicated", labelNames);
                 for (Map.Entry<String, TopicDescription> entry : map.entrySet()) {
                     String topic = entry.getKey();
                     TopicDescription td = entry.getValue();
                     List<TopicPartitionInfo> partitions = td.partitions();
                     topics.addMetric(Collections.singletonList(topic), partitions.size());
+                    for (TopicPartitionInfo tpi : partitions) {
+                        String partition = String.valueOf(tpi.partition());
+                        List<String> labels = Arrays.asList(partition, topic);
+
+                        List<Node> replicas = tpi.replicas();
+                        nReplicas.addMetric(labels, replicas.size());
+
+                        List<Node> isrs = tpi.isr();
+                        nIsrs.addMetric(labels, isrs.size());
+
+                        Node leader = tpi.leader();
+                        if (leader != null) {
+                            int leaderId = leader.id();
+                            leaders.addMetric(labels, leaderId);
+                            preferred.addMetric(labels, replicas.size() > 0 && replicas.get(0).id() == leaderId ? 1 : 0);
+                            under.addMetric(labels, isrs.size() < replicas.size() ? 1 : 0);
+                        }
+                    }
                 }
-                return topics;
+                return Arrays.asList(topics, leaders, nReplicas, nIsrs, preferred, under);
             });
 
             CompletableFuture<Map<TopicPartition, ListOffsetsResult.ListOffsetsResultInfo>> currentOffsets =
