@@ -4,7 +4,6 @@ import io.strimzi.kafkaexporter.server.utils.AdminProvider;
 import io.strimzi.kafkaexporter.server.utils.AdminProviderImpl;
 import io.strimzi.kafkaexporter.server.utils.InjectedProperties;
 import io.strimzi.kafkaexporter.server.utils.PropertiesUtil;
-import org.apache.kafka.clients.admin.Admin;
 
 import javax.enterprise.context.ApplicationScoped;
 import javax.enterprise.inject.Disposes;
@@ -27,7 +26,7 @@ public class Configuration {
         return new AdminProviderImpl(properties);
     }
 
-    public void closeAdmin(@Disposes Admin admin) {
-        admin.close();
+    public void closeAdmin(@Disposes AdminProvider adminProvider) throws Exception {
+        adminProvider.close();
     }
 }
