@@ -29,6 +29,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -59,6 +60,11 @@ public class KafkaCollector extends Collector implements Collector.Describable {
     @ConfigProperty(name = "group.filter", defaultValue = ".*")
     Pattern groupFilter;
 
+    @ConfigProperty(name = "kafka.labels", defaultValue = "")
+    String kafkaLabels;
+
+    private Map<String, String> labels;
+
     @Inject
     AdminProvider adminProvider;
 
@@ -72,6 +78,38 @@ public class KafkaCollector extends Collector implements Collector.Describable {
             }
         });
         return cf;
+    }
+
+    private void initLabels() {
+        if (labels == null) {
+            if (kafkaLabels.length() > 0) {
+                labels = new LinkedHashMap<>();
+                String[] split = kafkaLabels.split(",");
+                for (String s : split) {
+                    String[] pairs = s.split("=");
+                    if (pairs.length != 2) {
+                        throw new IllegalArgumentException("Invalid kafka.labels property: " + kafkaLabels);
+                    }
+                    labels.put(pairs[0], pairs[1]);
+                }
+            } else {
+                labels = Collections.emptyMap();
+            }
+        }
+    }
+
+    private List<String> toLabels(String... ls) {
+        List<String> result = new ArrayList<>();
+        result.addAll(labels.keySet());
+        result.addAll(Arrays.asList(ls));
+        return result;
+    }
+
+    private List<String> toValues(Object... vs) {
+        List<String> result = new ArrayList<>();
+        result.addAll(labels.values());
+        result.addAll(Arrays.stream(vs).map(String::valueOf).collect(Collectors.toList()));
+        return result;
     }
 
     private String fqn(String system, String name) {
@@ -102,7 +140,9 @@ public class KafkaCollector extends Collector implements Collector.Describable {
     private <T> void collectNumber(List<CompletableFuture<?>> tasks, List<MetricFamilySamples> mfs, String fqn, String help, CompletableFuture<T> cf, Function<T, Number> fn) {
         collectSingle(tasks, mfs, fqn, cf, r -> {
             Number value = fn.apply(r);
-            return new GaugeMetricFamily(fqn, help, value.doubleValue());
+            GaugeMetricFamily gauge = new GaugeMetricFamily(fqn, help, toLabels());
+            gauge.addMetric(toValues(), value.doubleValue());
+            return gauge;
         });
     }
 
@@ -124,6 +164,7 @@ public class KafkaCollector extends Collector implements Collector.Describable {
 
     @Override
     public List<MetricFamilySamples> describe() {
+        initLabels(); // should be called only at initial registration
         // we use single Collector, so we should be fine - no collisions
         // this then allows for lazy Admin init
         return Collections.emptyList();
@@ -146,8 +187,8 @@ public class KafkaCollector extends Collector implements Collector.Describable {
                     return Collections.emptyList();
                 }
 
-                GaugeMetricFamily topics = new GaugeMetricFamily(fqn("topic", "partitions"), "Number of partitions for this Topic", Collections.singletonList("topic"));
-                List<String> labelNames = Arrays.asList("partition", "topic");
+                GaugeMetricFamily topics = new GaugeMetricFamily(fqn("topic", "partitions"), "Number of partitions for this Topic", toLabels("topic"));
+                List<String> labelNames = toLabels("partition", "topic");
                 GaugeMetricFamily leaders = new GaugeMetricFamily(fqn("topic", "partition_leader"), "Leader Broker ID of this Topic/Partition", labelNames);
                 GaugeMetricFamily nReplicas = new GaugeMetricFamily(fqn("topic", "partition_replicas"), "Number of Replicas for this Topic/Partition", labelNames);
                 GaugeMetricFamily nIsrs = new GaugeMetricFamily(fqn("topic", "partition_in_sync_replica"), "Number of In-Sync Replicas for this Topic/Partition", labelNames);
@@ -157,23 +198,23 @@ public class KafkaCollector extends Collector implements Collector.Describable {
                     String topic = entry.getKey();
                     TopicDescription td = entry.getValue();
                     List<TopicPartitionInfo> partitions = td.partitions();
-                    topics.addMetric(Collections.singletonList(topic), partitions.size());
+                    topics.addMetric(toValues(topic), partitions.size());
                     for (TopicPartitionInfo tpi : partitions) {
-                        String partition = String.valueOf(tpi.partition());
-                        List<String> labels = Arrays.asList(partition, topic);
+                        Integer partition = tpi.partition();
+                        List<String> values = toValues(partition, topic);
 
                         List<Node> replicas = tpi.replicas();
-                        nReplicas.addMetric(labels, replicas.size());
+                        nReplicas.addMetric(values, replicas.size());
 
                         List<Node> isrs = tpi.isr();
-                        nIsrs.addMetric(labels, isrs.size());
+                        nIsrs.addMetric(values, isrs.size());
 
                         Node leader = tpi.leader();
                         if (leader != null) {
                             int leaderId = leader.id();
-                            leaders.addMetric(labels, leaderId);
-                            preferred.addMetric(labels, replicas.size() > 0 && replicas.get(0).id() == leaderId ? 1 : 0);
-                            under.addMetric(labels, isrs.size() < replicas.size() ? 1 : 0);
+                            leaders.addMetric(values, leaderId);
+                            preferred.addMetric(values, replicas.size() > 0 && replicas.get(0).id() == leaderId ? 1 : 0);
+                            under.addMetric(values, isrs.size() < replicas.size() ? 1 : 0);
                         }
                     }
                 }
@@ -189,9 +230,9 @@ public class KafkaCollector extends Collector implements Collector.Describable {
 
             CompletableFuture<Map<String, ConsumerGroupDescription>> cgdMapCF = groupIdsCF.thenCompose(ids -> toCF(admin.describeConsumerGroups(ids).all()));
             collectSingle(futures, mfs, fqn("consumergroup", "members"), cgdMapCF, map -> {
-                GaugeMetricFamily groups = new GaugeMetricFamily(fqn("consumergroup", "members"), "Amount of members in a consumer group", Collections.singletonList("consumergroup"));
+                GaugeMetricFamily groups = new GaugeMetricFamily(fqn("consumergroup", "members"), "Amount of members in a consumer group", toLabels("consumergroup"));
                 for (Map.Entry<String, ConsumerGroupDescription> entry : map.entrySet()) {
-                    groups.addMetric(Collections.singletonList(entry.getKey()), entry.getValue().members().size());
+                    groups.addMetric(toValues(entry.getKey()), entry.getValue().members().size());
                 }
                 return groups;
             });
@@ -216,13 +257,13 @@ public class KafkaCollector extends Collector implements Collector.Describable {
                     return metrics;
                 }
 
-                GaugeMetricFamily groupOffsets = new GaugeMetricFamily(fqn("consumergroup", "current_offset"), "Current Offset of a ConsumerGroup at Topic/Partition", Arrays.asList("consumergroup", "topic", "partition"));
+                GaugeMetricFamily groupOffsets = new GaugeMetricFamily(fqn("consumergroup", "current_offset"), "Current Offset of a ConsumerGroup at Topic/Partition", toLabels("consumergroup", "topic", "partition"));
                 metrics.add(groupOffsets);
-                GaugeMetricFamily groupOffsetsSum = new GaugeMetricFamily(fqn("consumergroup", "current_offset_sum"), "Current Offset of a ConsumerGroup at Topic for all partitions", Arrays.asList("consumergroup", "topic"));
+                GaugeMetricFamily groupOffsetsSum = new GaugeMetricFamily(fqn("consumergroup", "current_offset_sum"), "Current Offset of a ConsumerGroup at Topic for all partitions", toLabels("consumergroup", "topic"));
                 metrics.add(groupOffsetsSum);
-                GaugeMetricFamily groupLags = new GaugeMetricFamily(fqn("consumergroup", "lag"), "Current Approximate Lag of a ConsumerGroup at Topic/Partition", Arrays.asList("consumergroup", "topic", "partition"));
+                GaugeMetricFamily groupLags = new GaugeMetricFamily(fqn("consumergroup", "lag"), "Current Approximate Lag of a ConsumerGroup at Topic/Partition", toLabels("consumergroup", "topic", "partition"));
                 metrics.add(groupLags);
-                GaugeMetricFamily groupLagSum = new GaugeMetricFamily(fqn("consumergroup", "lag_sum"), "Current Approximate Lag of a ConsumerGroup at Topic for all partitions", Arrays.asList("consumergroup", "topic"));
+                GaugeMetricFamily groupLagSum = new GaugeMetricFamily(fqn("consumergroup", "lag_sum"), "Current Approximate Lag of a ConsumerGroup at Topic for all partitions", toLabels("consumergroup", "topic"));
                 metrics.add(groupLagSum);
 
                 for (Map.Entry<String, Map<TopicPartition, OffsetAndMetadata>> entry : groupOffsetsMap.entrySet()) {
@@ -240,7 +281,7 @@ public class KafkaCollector extends Collector implements Collector.Describable {
                             }
                         }
                     }
-                    topicOffsetSum.forEach((t, o) -> groupOffsetsSum.addMetric(Arrays.asList(group, t), o));
+                    topicOffsetSum.forEach((t, o) -> groupOffsetsSum.addMetric(toValues(group, t), o));
 
                     Map<String, Long> topicLagSum = new HashMap<>();
                     for (Map.Entry<TopicPartition, OffsetAndMetadata> subEntry : offsetMap.entrySet()) {
@@ -260,12 +301,12 @@ public class KafkaCollector extends Collector implements Collector.Describable {
                                 } else {
                                     lag = -1;
                                 }
-                                groupLags.addMetric(Arrays.asList(group, topic, String.valueOf(partition)), lag);
+                                groupLags.addMetric(toValues(group, topic, String.valueOf(partition)), lag);
                             }
-                            groupOffsets.addMetric(Arrays.asList(group, topic, String.valueOf(partition)), offset);
+                            groupOffsets.addMetric(toValues(group, topic, String.valueOf(partition)), offset);
                         }
                     }
-                    topicLagSum.forEach((t, l) -> groupLagSum.addMetric(Arrays.asList(group, t), l));
+                    topicLagSum.forEach((t, l) -> groupLagSum.addMetric(toValues(group, t), l));
                 }
                 return metrics;
             });
@@ -289,12 +330,12 @@ public class KafkaCollector extends Collector implements Collector.Describable {
             return toCF(admin.listOffsets(currentMap).all());
         });
         collectSingle(futures, mfs, fqn, offsetCS, map -> {
-            GaugeMetricFamily partitions = new GaugeMetricFamily(fqn, help, Arrays.asList("partition", "topic"));
+            GaugeMetricFamily partitions = new GaugeMetricFamily(fqn, help, toLabels("partition", "topic"));
             for (Map.Entry<TopicPartition, ListOffsetsResult.ListOffsetsResultInfo> offsetEntry : map.entrySet()) {
                 Number offset = offsetEntry.getValue().offset();
                 String topic = offsetEntry.getKey().topic();
                 int partition = offsetEntry.getKey().partition();
-                partitions.addMetric(Arrays.asList(String.valueOf(partition), topic), offset.doubleValue());
+                partitions.addMetric(toValues(partition, topic), offset.doubleValue());
             }
             return partitions;
         });
