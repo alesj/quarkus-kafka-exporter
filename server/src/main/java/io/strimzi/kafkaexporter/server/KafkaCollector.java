@@ -32,6 +32,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -60,8 +61,8 @@ public class KafkaCollector extends Collector implements Collector.Describable {
     @ConfigProperty(name = "group.filter", defaultValue = ".*")
     Pattern groupFilter;
 
-    @ConfigProperty(name = "kafka.labels", defaultValue = "")
-    String kafkaLabels;
+    @ConfigProperty(name = "kafka.labels")
+    Optional<String> kafkaLabels;
 
     private Map<String, String> labels;
 
@@ -82,9 +83,9 @@ public class KafkaCollector extends Collector implements Collector.Describable {
 
     private void initLabels() {
         if (labels == null) {
-            if (kafkaLabels.length() > 0) {
+            if (kafkaLabels.isPresent()) {
                 labels = new LinkedHashMap<>();
-                String[] split = kafkaLabels.split(",");
+                String[] split = kafkaLabels.get().split(",");
                 for (String s : split) {
                     String[] pairs = s.split("=");
                     if (pairs.length != 2) {

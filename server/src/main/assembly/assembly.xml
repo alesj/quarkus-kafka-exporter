@@ -9,12 +9,15 @@
     <includeBaseDirectory>false</includeBaseDirectory>
     <fileSets>
         <fileSet>
-            <directory>target</directory>
+            <directory>target/quarkus-app</directory>
             <outputDirectory>/</outputDirectory>
             <filtered>false</filtered>
             <includes>
-                <include>kafka-exporter-server-*-runner.jar</include>
-                <include>lib/*</include>
+                <include>quarkus-run.jar</include>
+                <include>quarkus-app-dependencies.txt</include>
+                <include>app/*</include>
+                <include>lib/**</include>
+                <include>quarkus/*</include>
             </includes>
         </fileSet>
     </fileSets>
