@@ -117,11 +117,11 @@ public class KafkaCollector extends Collector implements Collector.Describable {
         if (namespace != null && system != null) {
             return namespace + "_" + system + "_" + name;
         }
-        if (system != null) {
-            return system + "_" + name;
-        }
         if (namespace != null) {
             return namespace + "_" + name;
+        }
+        if (system != null) {
+            return system + "_" + name;
         }
         return name;
     }
