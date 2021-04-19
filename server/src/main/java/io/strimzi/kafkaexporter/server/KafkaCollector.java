@@ -81,7 +81,7 @@ public class KafkaCollector extends Collector implements Collector.Describable {
         return cf;
     }
 
-    private void initLabels() {
+    private synchronized void initLabels() {
         if (labels == null) {
             if (kafkaLabels.isPresent()) {
                 labels = new LinkedHashMap<>();
