@@ -1,8 +1,11 @@
+/*
+ * Copyright Red Hat inc.
+ * License: Apache License 2.0 (see the file LICENSE or http://apache.org/licenses/LICENSE-2.0.html).
+ */
 package io.strimzi.kafkaexporter.server;
 
 import io.prometheus.client.Collector;
 import io.prometheus.client.GaugeMetricFamily;
-import io.quarkus.runtime.StartupEvent;
 import io.strimzi.kafkaexporter.server.utils.AdminHandle;
 import io.strimzi.kafkaexporter.server.utils.AdminProvider;
 import org.apache.kafka.clients.admin.Admin;
@@ -18,11 +21,8 @@ import org.apache.kafka.common.Node;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.TopicPartitionInfo;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import javax.enterprise.context.ApplicationScoped;
-import javax.enterprise.event.Observes;
 import javax.inject.Inject;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -40,17 +40,13 @@ import java.util.function.Function;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import static io.strimzi.kafkaexporter.server.utils.KafkaUtil.toCF;
+
 /**
  * @author Ales Justin
  */
 @ApplicationScoped
-public class KafkaCollector extends Collector implements Collector.Describable {
-    private static final Logger log = LoggerFactory.getLogger(KafkaCollector.class);
-
-    public void init(@Observes StartupEvent event) {
-        log.info("Registered " + KafkaCollector.class.getSimpleName() + " ...");
-        register();
-    }
+public class KafkaAsyncCollector implements AsyncCollector {
 
     @ConfigProperty(name = "namespace", defaultValue = "kafka")
     String namespace;
@@ -69,19 +65,7 @@ public class KafkaCollector extends Collector implements Collector.Describable {
     @Inject
     AdminProvider adminProvider;
 
-    private static <T> CompletableFuture<T> toCF(KafkaFuture<T> kf) {
-        CompletableFuture<T> cf = new CompletableFuture<>();
-        kf.whenComplete((v, t) -> {
-            if (t != null) {
-                cf.completeExceptionally(t);
-            } else {
-                cf.complete(v);
-            }
-        });
-        return cf;
-    }
-
-    private synchronized void initLabels() {
+    private synchronized Map<String, String> getLabels() {
         if (labels == null) {
             if (kafkaLabels.isPresent()) {
                 labels = new LinkedHashMap<>();
@@ -97,18 +81,19 @@ public class KafkaCollector extends Collector implements Collector.Describable {
                 labels = Collections.emptyMap();
             }
         }
+        return labels;
     }
 
     private List<String> toLabels(String... ls) {
         List<String> result = new ArrayList<>();
-        result.addAll(labels.keySet());
+        result.addAll(getLabels().keySet());
         result.addAll(Arrays.asList(ls));
         return result;
     }
 
     private List<String> toValues(Object... vs) {
         List<String> result = new ArrayList<>();
-        result.addAll(labels.values());
+        result.addAll(getLabels().values());
         result.addAll(Arrays.stream(vs).map(String::valueOf).collect(Collectors.toList()));
         return result;
     }
@@ -138,8 +123,8 @@ public class KafkaCollector extends Collector implements Collector.Describable {
             .collect(Collectors.toSet());
     }
 
-    private <T> void collectNumber(List<CompletableFuture<?>> tasks, List<MetricFamilySamples> mfs, String fqn, String help, CompletableFuture<T> cf, Function<T, Number> fn) {
-        collectSingle(tasks, mfs, fqn, cf, r -> {
+    private <T> void collectNumber(List<CompletableFuture<List<Collector.MetricFamilySamples>>> tasks, String fqn, String help, CompletableFuture<T> cf, Function<T, Number> fn) {
+        collectSingle(tasks, cf, r -> {
             Number value = fn.apply(r);
             GaugeMetricFamily gauge = new GaugeMetricFamily(fqn, help, toLabels());
             gauge.addMetric(toValues(), value.doubleValue());
@@ -147,43 +132,27 @@ public class KafkaCollector extends Collector implements Collector.Describable {
         });
     }
 
-    private <T> void collectSingle(List<CompletableFuture<?>> tasks, List<MetricFamilySamples> mfs, String fqn, CompletableFuture<T> cf, Function<T, MetricFamilySamples> fn) {
-        collectList(tasks, mfs, fqn, cf, t -> Collections.singletonList(fn.apply(t)));
+    private <T> void collectSingle(List<CompletableFuture<List<Collector.MetricFamilySamples>>> tasks, CompletableFuture<T> cf, Function<T, Collector.MetricFamilySamples> fn) {
+        collectList(tasks, cf, t -> Collections.singletonList(fn.apply(t)));
     }
 
-    private <T> void collectList(List<CompletableFuture<?>> tasks, List<MetricFamilySamples> mfs, String fqn, CompletableFuture<T> cf, Function<T, List<MetricFamilySamples>> fn) {
-        CompletableFuture<T> task = cf.whenComplete((r, t) -> {
-            if (t != null) {
-                log.error("Error getting metrics for '{}'", fqn, t);
-            } else {
-                List<MetricFamilySamples> samples = fn.apply(r);
-                mfs.addAll(samples);
-            }
-        });
+    private <T> void collectList(List<CompletableFuture<List<Collector.MetricFamilySamples>>> tasks, CompletableFuture<T> cf, Function<T, List<Collector.MetricFamilySamples>> fn) {
+        CompletableFuture<List<Collector.MetricFamilySamples>> task = cf.thenApply(fn);
         tasks.add(task);
     }
 
     @Override
-    public List<MetricFamilySamples> describe() {
-        initLabels(); // should be called only at initial registration
-        // we use single Collector, so we should be fine - no collisions
-        // this then allows for lazy Admin init
-        return Collections.emptyList();
-    }
-
-    @Override
-    public List<MetricFamilySamples> collect() {
+    public CollectorResult collect() {
         try (AdminHandle adminHandle = adminProvider.getAdminHandle()) {
             Admin admin = adminHandle.getAdmin();
-            List<CompletableFuture<?>> futures = new ArrayList<>();
+            List<CompletableFuture<List<Collector.MetricFamilySamples>>> futures = new ArrayList<>();
 
-            List<MetricFamilySamples> mfs = new ArrayList<>();
-            collectNumber(futures, mfs, fqn(null, "brokers"), "Number of Brokers in the Kafka Cluster.", toCF(admin.describeCluster().nodes()), Collection::size);
+            collectNumber(futures, fqn(null, "brokers"), "Number of Brokers in the Kafka Cluster.", toCF(admin.describeCluster().nodes()), Collection::size);
 
             CompletableFuture<Set<String>> topicsCS = toCF(admin.listTopics(new ListTopicsOptions().listInternal(true)).names());
 
             CompletableFuture<Map<String, TopicDescription>> descCS = topicsCS.thenCompose(topics -> toCF(admin.describeTopics(filterTopics(topics)).all()));
-            collectList(futures, mfs, fqn("topic", "partitions"), descCS, map -> {
+            collectList(futures, descCS, map -> {
                 if (map.isEmpty()) {
                     return Collections.emptyList();
                 }
@@ -223,14 +192,14 @@ public class KafkaCollector extends Collector implements Collector.Describable {
             });
 
             CompletableFuture<Map<TopicPartition, ListOffsetsResult.ListOffsetsResultInfo>> currentOffsets =
-                offsets(admin, futures, mfs, fqn("topic", "partition_current_offset"), "Current Offset of a Broker at Topic/Partition", descCS, OffsetSpec.latest());
-            offsets(admin, futures, mfs, fqn("topic", "partition_oldest_offset"), "Oldest Offset of a Broker at Topic/Partition", descCS, OffsetSpec.earliest());
+                offsets(admin, futures, fqn("topic", "partition_current_offset"), "Current Offset of a Broker at Topic/Partition", descCS, OffsetSpec.latest());
+            offsets(admin, futures, fqn("topic", "partition_oldest_offset"), "Oldest Offset of a Broker at Topic/Partition", descCS, OffsetSpec.earliest());
 
             // only valid ?
             CompletableFuture<Collection<String>> groupIdsCF = toCF(admin.listConsumerGroups().valid()).thenApply(this::toGroupIds);
 
             CompletableFuture<Map<String, ConsumerGroupDescription>> cgdMapCF = groupIdsCF.thenCompose(ids -> toCF(admin.describeConsumerGroups(ids).all()));
-            collectSingle(futures, mfs, fqn("consumergroup", "members"), cgdMapCF, map -> {
+            collectSingle(futures, cgdMapCF, map -> {
                 GaugeMetricFamily groups = new GaugeMetricFamily(fqn("consumergroup", "members"), "Amount of members in a consumer group", toLabels("consumergroup"));
                 for (Map.Entry<String, ConsumerGroupDescription> entry : map.entrySet()) {
                     groups.addMetric(toValues(entry.getKey()), entry.getValue().members().size());
@@ -251,8 +220,8 @@ public class KafkaCollector extends Collector implements Collector.Describable {
                 }
                 return toCF(KafkaFuture.allOf(groupOffsetKFs.toArray(new KafkaFuture[0]))).thenCompose(v -> currentOffsets);
             });
-            collectList(futures, mfs, fqn("consumergroup", "current_offset"), cgOffsets, map -> {
-                List<MetricFamilySamples> metrics = new ArrayList<>();
+            collectList(futures, cgOffsets, map -> {
+                List<Collector.MetricFamilySamples> metrics = new ArrayList<>();
 
                 if (groupOffsetsMap.isEmpty()) {
                     return metrics;
@@ -312,15 +281,20 @@ public class KafkaCollector extends Collector implements Collector.Describable {
                 return metrics;
             });
 
-            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
-
-            return mfs;
+            return new CollectorResultImpl(futures);
         } catch (Exception e) {
             throw new IllegalStateException(e);
         }
     }
 
-    private CompletableFuture<Map<TopicPartition, ListOffsetsResult.ListOffsetsResultInfo>> offsets(Admin admin, List<CompletableFuture<?>> futures, List<MetricFamilySamples> mfs, String fqn, String help, CompletableFuture<Map<String, TopicDescription>> descCS, OffsetSpec spec) {
+    private CompletableFuture<Map<TopicPartition, ListOffsetsResult.ListOffsetsResultInfo>> offsets(
+        Admin admin,
+        List<CompletableFuture<List<Collector.MetricFamilySamples>>> futures,
+        String fqn,
+        String help,
+        CompletableFuture<Map<String, TopicDescription>> descCS,
+        OffsetSpec spec
+    ) {
         CompletableFuture<Map<TopicPartition, ListOffsetsResult.ListOffsetsResultInfo>> offsetCS = descCS.thenCompose(map -> {
             Map<TopicPartition, OffsetSpec> currentMap = new HashMap<>();
             for (TopicDescription td : map.values()) {
@@ -330,7 +304,7 @@ public class KafkaCollector extends Collector implements Collector.Describable {
             }
             return toCF(admin.listOffsets(currentMap).all());
         });
-        collectSingle(futures, mfs, fqn, offsetCS, map -> {
+        collectSingle(futures, offsetCS, map -> {
             GaugeMetricFamily partitions = new GaugeMetricFamily(fqn, help, toLabels("partition", "topic"));
             for (Map.Entry<TopicPartition, ListOffsetsResult.ListOffsetsResultInfo> offsetEntry : map.entrySet()) {
                 Number offset = offsetEntry.getValue().offset();

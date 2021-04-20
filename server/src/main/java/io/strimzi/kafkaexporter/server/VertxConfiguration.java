@@ -1,8 +1,12 @@
+/*
+ * Copyright Red Hat inc.
+ * License: Apache License 2.0 (see the file LICENSE or http://apache.org/licenses/LICENSE-2.0.html).
+ */
 package io.strimzi.kafkaexporter.server;
 
-import io.prometheus.client.vertx.MetricsHandler;
 import io.quarkus.runtime.ShutdownEvent;
 import io.quarkus.runtime.StartupEvent;
+import io.strimzi.kafkaexporter.server.vertx.AsyncMetricsHandler;
 import io.vertx.core.Vertx;
 import io.vertx.core.http.HttpServer;
 import io.vertx.ext.web.Router;
@@ -24,6 +28,9 @@ public class VertxConfiguration {
     @Inject
     Vertx vertx;
 
+    @Inject
+    AsyncCollector collector;
+
     @ConfigProperty(name = "metrics.path", defaultValue = "/metrics")
     String metricsPath;
 
@@ -36,7 +43,7 @@ public class VertxConfiguration {
         Router router = Router.router(vertx);
 
         router.route("/").handler(new IndexHandler(metricsPath));
-        router.route(metricsPath).handler(new MetricsHandler());
+        router.route(metricsPath).handler(new AsyncMetricsHandler(collector));
         router.route("/healthz").handler(routingContext -> {
             routingContext.response().putHeader("content-type", "text").end("OK");
         });

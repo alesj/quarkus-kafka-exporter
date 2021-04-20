@@ -58,12 +58,7 @@
             <!-- Prometheus -->
             <dependency>
                 <groupId>io.prometheus</groupId>
-                <artifactId>simpleclient_vertx</artifactId>
-                <version>${prometheus.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>io.prometheus</groupId>
-                <artifactId>simpleclient_pushgateway</artifactId>
+                <artifactId>simpleclient_common</artifactId>
                 <version>${prometheus.version}</version>
             </dependency>
 
