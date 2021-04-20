@@ -30,36 +30,11 @@ Other config includes (same as kafka_exporter)
     @ConfigProperty(name = "group.filter", defaultValue = ".*")
     Pattern groupFilter;
 
+    @ConfigProperty(name = "group.list", defaultValue = "VALID")
+    Groups groups; // list all or just valid groups; see ListConsumerGroupsResult
+
     @ConfigProperty(name = "kafka.labels")
     Optional<String> kafkaLabels;
-```
-
-Additionally there is a PushGateway support, which is enabled if you configure `pushgateway.url` property.
-
-```
-    @ConfigProperty(name = "pushgateway.url")
-    Optional<URL> url;
-
-    @ConfigProperty(name = "pushgateway.factory")
-    Optional<Class<HttpConnectionFactory>> factoryClass;
-
-    @ConfigProperty(name = "pushgateway.username")
-    Optional<String> username;
-
-    @ConfigProperty(name = "pushgateway.password")
-    Optional<String> password;
-
-    @ConfigProperty(name = "pushgateway.job", defaultValue = "kafka")
-    String job;
-
-    @ConfigProperty(name = "pushgateway.pool-size", defaultValue = "2")
-    int poolSize;
-    @ConfigProperty(name = "pushgateway.initial-delay", defaultValue = "60")
-    long initialDelay;
-    @ConfigProperty(name = "pushgateway.period", defaultValue = "60")
-    long period;
-    @ConfigProperty(name = "pushgateway.unit", defaultValue = "SECONDS")
-    TimeUnit unit;
 ```
 
 TODO ... more docs

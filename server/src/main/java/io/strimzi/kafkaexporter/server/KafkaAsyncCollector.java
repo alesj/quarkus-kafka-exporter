@@ -8,6 +8,7 @@ import io.prometheus.client.Collector;
 import io.prometheus.client.GaugeMetricFamily;
 import io.strimzi.kafkaexporter.server.utils.AdminHandle;
 import io.strimzi.kafkaexporter.server.utils.AdminProvider;
+import io.strimzi.kafkaexporter.server.utils.Groups;
 import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.ConsumerGroupDescription;
 import org.apache.kafka.clients.admin.ConsumerGroupListing;
@@ -56,6 +57,9 @@ public class KafkaAsyncCollector implements AsyncCollector {
 
     @ConfigProperty(name = "group.filter", defaultValue = ".*")
     Pattern groupFilter;
+
+    @ConfigProperty(name = "group.list", defaultValue = "VALID")
+    Groups groups; // list all or just valid groups; see ListConsumerGroupsResult
 
     @ConfigProperty(name = "kafka.labels")
     Optional<String> kafkaLabels;
@@ -195,8 +199,7 @@ public class KafkaAsyncCollector implements AsyncCollector {
                 offsets(admin, futures, fqn("topic", "partition_current_offset"), "Current Offset of a Broker at Topic/Partition", descCS, OffsetSpec.latest());
             offsets(admin, futures, fqn("topic", "partition_oldest_offset"), "Oldest Offset of a Broker at Topic/Partition", descCS, OffsetSpec.earliest());
 
-            // only valid ?
-            CompletableFuture<Collection<String>> groupIdsCF = toCF(admin.listConsumerGroups().valid()).thenApply(this::toGroupIds);
+            CompletableFuture<Collection<String>> groupIdsCF = toCF(groups.apply(admin.listConsumerGroups())).thenApply(this::toGroupIds);
 
             CompletableFuture<Map<String, ConsumerGroupDescription>> cgdMapCF = groupIdsCF.thenCompose(ids -> toCF(admin.describeConsumerGroups(ids).all()));
             collectSingle(futures, cgdMapCF, map -> {
