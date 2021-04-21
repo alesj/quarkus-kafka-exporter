@@ -4,9 +4,6 @@
  */
 package io.strimzi.kafkaexporter.server;
 
-import io.micrometer.prometheus.PrometheusMeterRegistry;
-import io.strimzi.kafkaexporter.server.registry.MeterRegistryExporter;
-import io.strimzi.kafkaexporter.server.registry.PrometheusMeterRegistryExporter;
 import io.strimzi.kafkaexporter.server.utils.AdminProvider;
 import io.strimzi.kafkaexporter.server.utils.AdminProviderImpl;
 import io.strimzi.kafkaexporter.server.utils.InjectedProperties;
@@ -16,7 +13,6 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 import javax.enterprise.context.ApplicationScoped;
 import javax.enterprise.inject.Disposes;
-import javax.enterprise.inject.Instance;
 import javax.enterprise.inject.Produces;
 import javax.enterprise.inject.spi.InjectionPoint;
 import java.time.Duration;
@@ -46,11 +42,5 @@ public class Configuration {
 
     public void closeAdmin(@Disposes AdminProvider adminProvider) throws Exception {
         adminProvider.close();
-    }
-
-    @Produces
-    @ApplicationScoped
-    public MeterRegistryExporter meterRegistryExporter(Instance<PrometheusMeterRegistry> registries) {
-        return new PrometheusMeterRegistryExporter(registries);
     }
 }

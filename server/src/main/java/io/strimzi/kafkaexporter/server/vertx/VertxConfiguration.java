@@ -41,7 +41,7 @@ public class VertxConfiguration {
 
     public void init(@Observes Router router) {
         log.info("Adding custom metrics paths ...");
-        router.route("/").handler(new IndexHandler(metricsPath));
+        router.get("/").handler(new IndexHandler(metricsPath));
         router.route(metricsPath).handler(new AsyncMetricsHandler(exporter, collector));
         router.route(healthPath).handler(routingContext -> {
             routingContext.response().putHeader(CONTENT_TYPE, "text").end("OK");

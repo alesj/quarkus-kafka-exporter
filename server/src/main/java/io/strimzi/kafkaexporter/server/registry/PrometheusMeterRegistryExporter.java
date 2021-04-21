@@ -10,7 +10,10 @@ import io.prometheus.client.exporter.common.TextFormat;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.PostConstruct;
 import javax.enterprise.inject.Instance;
+import javax.inject.Inject;
+import javax.inject.Singleton;
 import java.io.IOException;
 import java.io.Writer;
 import java.util.List;
@@ -18,12 +21,17 @@ import java.util.List;
 /**
  * @author Ales Justin
  */
+@Singleton
 public class PrometheusMeterRegistryExporter implements MeterRegistryExporter {
     private static final Logger log = LoggerFactory.getLogger(PrometheusMeterRegistryExporter.class);
 
-    private final PrometheusMeterRegistry registry;
+    @Inject
+    Instance<PrometheusMeterRegistry> registries;
 
-    public PrometheusMeterRegistryExporter(Instance<PrometheusMeterRegistry> registries) {
+    private PrometheusMeterRegistry registry;
+
+    @PostConstruct
+    void init () {
         if (registries.isUnsatisfied()) {
             registry = null;
         } else if (registries.isAmbiguous()) {
