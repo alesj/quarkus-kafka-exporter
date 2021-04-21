@@ -4,9 +4,9 @@
  */
 package io.strimzi.kafkaexporter.server.vertx;
 
-import io.prometheus.client.exporter.common.TextFormat;
 import io.strimzi.kafkaexporter.server.AsyncCollector;
 import io.strimzi.kafkaexporter.server.CollectorResult;
+import io.strimzi.kafkaexporter.server.registry.MeterRegistryExporter;
 import io.vertx.core.Handler;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.ext.web.RoutingContext;
@@ -14,7 +14,6 @@ import io.vertx.ext.web.RoutingContext;
 import java.io.IOException;
 import java.io.Writer;
 import java.net.HttpURLConnection;
-import java.util.Collections;
 
 /**
  * @author Ales Justin
@@ -49,27 +48,35 @@ public class AsyncMetricsHandler implements Handler<RoutingContext> {
         }
     }
 
+    private final MeterRegistryExporter exporter;
     private final AsyncCollector collector;
 
-    public AsyncMetricsHandler(AsyncCollector collector) {
+    public AsyncMetricsHandler(MeterRegistryExporter exporter, AsyncCollector collector) {
+        this.exporter = exporter;
         this.collector = collector;
     }
 
     @Override
     public void handle(RoutingContext ctx) {
-        String contentType = TextFormat.chooseContentType(ctx.request().headers().get("Accept"));
-        CollectorResult result = collector.collect();
-        result.getFuture().thenAccept(list -> {
-            final BufferWriter writer = new BufferWriter();
-            try {
-                TextFormat.writeFormat(contentType, writer, Collections.enumeration(list));
-                ctx.response()
-                    .setStatusCode(HttpURLConnection.HTTP_OK)
-                    .putHeader("Content-Type", contentType)
-                    .end(writer.getBuffer());
-            } catch (IOException e) {
-                ctx.fail(e);
-            }
-        });
+        if (!exporter.canExport()) {
+            ctx.response()
+                .setStatusCode(HttpURLConnection.HTTP_INTERNAL_ERROR)
+                .setStatusMessage("Error exporting meter registry data")
+                .end();
+        } else {
+            CollectorResult result = collector.collect();
+            result.getFuture().thenAccept(meters -> {
+                final BufferWriter writer = new BufferWriter();
+                try {
+                    String contentType = exporter.scrape(meters, writer);
+                    ctx.response()
+                        .setStatusCode(HttpURLConnection.HTTP_OK)
+                        .putHeader(VertxConfiguration.CONTENT_TYPE, contentType)
+                        .end(writer.getBuffer());
+                } catch (IOException e) {
+                    ctx.fail(e);
+                }
+            });
+        }
     }
 }

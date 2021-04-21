@@ -2,7 +2,7 @@
  * Copyright Red Hat inc.
  * License: Apache License 2.0 (see the file LICENSE or http://apache.org/licenses/LICENSE-2.0.html).
  */
-package io.strimzi.kafkaexporter.server;
+package io.strimzi.kafkaexporter.server.vertx;
 
 import io.vertx.core.Handler;
 import io.vertx.ext.web.RoutingContext;
@@ -21,7 +21,7 @@ public class IndexHandler implements Handler<RoutingContext> {
     public void handle(RoutingContext routingContext) {
         routingContext
             .response()
-            .putHeader("content-type", "text/html")
+            .putHeader(VertxConfiguration.CONTENT_TYPE, "text/html")
             .end("<html>\n" +
                 "<head><title>Kafka Exporter</title></head>\n" +
                 "<body>\n" +

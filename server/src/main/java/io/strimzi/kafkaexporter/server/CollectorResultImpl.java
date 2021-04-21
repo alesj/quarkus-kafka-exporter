@@ -4,7 +4,7 @@
  */
 package io.strimzi.kafkaexporter.server;
 
-import io.prometheus.client.Collector;
+import io.micrometer.core.instrument.Meter;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -14,9 +14,9 @@ import java.util.concurrent.CompletableFuture;
  * @author Ales Justin
  */
 public class CollectorResultImpl implements CollectorResult {
-    private final List<CompletableFuture<List<Collector.MetricFamilySamples>>> futures;
+    private final List<CompletableFuture<List<Meter>>> futures;
 
-    public CollectorResultImpl(List<CompletableFuture<List<Collector.MetricFamilySamples>>> futures) {
+    public CollectorResultImpl(List<CompletableFuture<List<Meter>>> futures) {
         this.futures = futures;
     }
 
@@ -24,20 +24,24 @@ public class CollectorResultImpl implements CollectorResult {
         return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
     }
 
-    private List<Collector.MetricFamilySamples> getMetricFamilySamples() {
-        List<Collector.MetricFamilySamples> results = new ArrayList<>();
-        for (CompletableFuture<List<Collector.MetricFamilySamples>> future : futures) {
+    private List<Meter> getMeters() {
+        List<Meter> results = new ArrayList<>();
+        for (CompletableFuture<List<Meter>> future : futures) {
             results.addAll(future.join()); // should be completed now
         }
         return results;
     }
 
-    public CompletableFuture<List<Collector.MetricFamilySamples>> getFuture() {
-        return allOf().thenApply(v -> getMetricFamilySamples());
+    public void join() {
+        allOf().join();
     }
 
-    public List<Collector.MetricFamilySamples> getCompleted() {
-        allOf().join();
-        return getMetricFamilySamples();
+    public CompletableFuture<List<Meter>> getFuture() {
+        return allOf().thenApply(v -> getMeters());
+    }
+
+    public List<Meter> getCompleted() {
+        join();
+        return getMeters();
     }
 }

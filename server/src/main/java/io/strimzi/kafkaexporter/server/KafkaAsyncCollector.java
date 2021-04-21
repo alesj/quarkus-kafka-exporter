@@ -4,8 +4,11 @@
  */
 package io.strimzi.kafkaexporter.server;
 
-import io.prometheus.client.Collector;
-import io.prometheus.client.GaugeMetricFamily;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.ImmutableTag;
+import io.micrometer.core.instrument.Meter;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Tag;
 import io.strimzi.kafkaexporter.server.utils.AdminHandle;
 import io.strimzi.kafkaexporter.server.utils.AdminProvider;
 import io.strimzi.kafkaexporter.server.utils.Groups;
@@ -69,6 +72,9 @@ public class KafkaAsyncCollector implements AsyncCollector {
     @Inject
     AdminProvider adminProvider;
 
+    @Inject
+    MeterRegistry registry;
+
     private synchronized Map<String, String> getLabels() {
         if (labels == null) {
             if (kafkaLabels.isPresent()) {
@@ -88,18 +94,27 @@ public class KafkaAsyncCollector implements AsyncCollector {
         return labels;
     }
 
-    private List<String> toLabels(String... ls) {
-        List<String> result = new ArrayList<>();
-        result.addAll(getLabels().keySet());
-        result.addAll(Arrays.asList(ls));
-        return result;
+    private Iterable<Tag> tags(List<String> labels, List<Object> values) {
+        if (labels.size() != values.size()) {
+            throw new IllegalArgumentException("Labels and values size are not equal!");
+        }
+        Map<String, String> tags = new LinkedHashMap<>(getLabels());
+        for (int i = 0; i < labels.size(); i++) {
+            tags.put(labels.get(i), String.valueOf(values.get(i)));
+        }
+        return tags
+            .entrySet()
+            .stream()
+            .map(e -> new ImmutableTag(e.getKey(), e.getValue()))
+            .collect(Collectors.toList());
     }
 
-    private List<String> toValues(Object... vs) {
-        List<String> result = new ArrayList<>();
-        result.addAll(getLabels().values());
-        result.addAll(Arrays.stream(vs).map(String::valueOf).collect(Collectors.toList()));
-        return result;
+    private List<String> toLabels(String... ls) {
+        return Arrays.asList(ls);
+    }
+
+    private List<Object> toValues(Object... vs) {
+       return Arrays.asList(vs);
     }
 
     private String fqn(String system, String name) {
@@ -127,21 +142,26 @@ public class KafkaAsyncCollector implements AsyncCollector {
             .collect(Collectors.toSet());
     }
 
-    private <T> void collectNumber(List<CompletableFuture<List<Collector.MetricFamilySamples>>> tasks, String fqn, String help, CompletableFuture<T> cf, Function<T, Number> fn) {
+    private Meter toGauge(String fqn, String help, Number value, List<String> labels, List<Object> values) {
+        return Gauge.builder(fqn, value, Number::doubleValue)
+            .description(help)
+            .tags(tags(labels, values))
+            .register(registry);
+    }
+
+    private <T> void collectNumber(List<CompletableFuture<List<Meter>>> tasks, String fqn, String help, CompletableFuture<T> cf, Function<T, Number> fn) {
         collectSingle(tasks, cf, r -> {
             Number value = fn.apply(r);
-            GaugeMetricFamily gauge = new GaugeMetricFamily(fqn, help, toLabels());
-            gauge.addMetric(toValues(), value.doubleValue());
-            return gauge;
+            return toGauge(fqn, help, value, toLabels(), toValues());
         });
     }
 
-    private <T> void collectSingle(List<CompletableFuture<List<Collector.MetricFamilySamples>>> tasks, CompletableFuture<T> cf, Function<T, Collector.MetricFamilySamples> fn) {
+    private <T> void collectSingle(List<CompletableFuture<List<Meter>>> tasks, CompletableFuture<T> cf, Function<T, Meter> fn) {
         collectList(tasks, cf, t -> Collections.singletonList(fn.apply(t)));
     }
 
-    private <T> void collectList(List<CompletableFuture<List<Collector.MetricFamilySamples>>> tasks, CompletableFuture<T> cf, Function<T, List<Collector.MetricFamilySamples>> fn) {
-        CompletableFuture<List<Collector.MetricFamilySamples>> task = cf.thenApply(fn);
+    private <T> void collectList(List<CompletableFuture<List<Meter>>> tasks, CompletableFuture<T> cf, Function<T, List<Meter>> fn) {
+        CompletableFuture<List<Meter>> task = cf.thenApply(fn);
         tasks.add(task);
     }
 
@@ -149,7 +169,7 @@ public class KafkaAsyncCollector implements AsyncCollector {
     public CollectorResult collect() {
         try (AdminHandle adminHandle = adminProvider.getAdminHandle()) {
             Admin admin = adminHandle.getAdmin();
-            List<CompletableFuture<List<Collector.MetricFamilySamples>>> futures = new ArrayList<>();
+            List<CompletableFuture<List<Meter>>> futures = new ArrayList<>();
 
             collectNumber(futures, fqn(null, "brokers"), "Number of Brokers in the Kafka Cluster.", toCF(admin.describeCluster().nodes()), Collection::size);
 
@@ -161,38 +181,43 @@ public class KafkaAsyncCollector implements AsyncCollector {
                     return Collections.emptyList();
                 }
 
-                GaugeMetricFamily topics = new GaugeMetricFamily(fqn("topic", "partitions"), "Number of partitions for this Topic", toLabels("topic"));
+                List<Meter> metrics = new ArrayList<>();
+
+                String partitionsFqn = fqn("topic", "partitions");
+                String replicasFqn = fqn("topic", "partition_replicas");
+                String isrsFqn = fqn("topic", "partition_in_sync_replica");
+                String leaderFqn = fqn("topic", "partition_leader");
+                String preferredFqn = fqn("topic", "partition_leader_is_preferred");
+                String underFqn = fqn("topic", "partition_under_replicated_partition");
+
                 List<String> labelNames = toLabels("partition", "topic");
-                GaugeMetricFamily leaders = new GaugeMetricFamily(fqn("topic", "partition_leader"), "Leader Broker ID of this Topic/Partition", labelNames);
-                GaugeMetricFamily nReplicas = new GaugeMetricFamily(fqn("topic", "partition_replicas"), "Number of Replicas for this Topic/Partition", labelNames);
-                GaugeMetricFamily nIsrs = new GaugeMetricFamily(fqn("topic", "partition_in_sync_replica"), "Number of In-Sync Replicas for this Topic/Partition", labelNames);
-                GaugeMetricFamily preferred = new GaugeMetricFamily(fqn("topic", "partition_leader_is_preferred"), "1 if Topic/Partition is using the Preferred Broker", labelNames);
-                GaugeMetricFamily under = new GaugeMetricFamily(fqn("topic", "partition_under_replicated_partition"), "1 if Topic/Partition is under Replicated", labelNames);
                 for (Map.Entry<String, TopicDescription> entry : map.entrySet()) {
                     String topic = entry.getKey();
                     TopicDescription td = entry.getValue();
                     List<TopicPartitionInfo> partitions = td.partitions();
-                    topics.addMetric(toValues(topic), partitions.size());
+
+                    metrics.add(toGauge(partitionsFqn, "Number of partitions for this Topic", partitions.size(), toLabels("topic"), toValues(topic)));
+
                     for (TopicPartitionInfo tpi : partitions) {
                         Integer partition = tpi.partition();
-                        List<String> values = toValues(partition, topic);
+                        List<Object> values = toValues(partition, topic);
 
                         List<Node> replicas = tpi.replicas();
-                        nReplicas.addMetric(values, replicas.size());
+                        metrics.add(toGauge(replicasFqn, "Number of Replicas for this Topic/Partition", replicas.size(), labelNames, values));
 
                         List<Node> isrs = tpi.isr();
-                        nIsrs.addMetric(values, isrs.size());
+                        metrics.add(toGauge(isrsFqn, "Number of In-Sync Replicas for this Topic/Partition", isrs.size(), labelNames, values));
 
                         Node leader = tpi.leader();
                         if (leader != null) {
                             int leaderId = leader.id();
-                            leaders.addMetric(values, leaderId);
-                            preferred.addMetric(values, replicas.size() > 0 && replicas.get(0).id() == leaderId ? 1 : 0);
-                            under.addMetric(values, isrs.size() < replicas.size() ? 1 : 0);
+                            metrics.add(toGauge(leaderFqn, "Leader Broker ID of this Topic/Partition", leaderId, labelNames, values));
+                            metrics.add(toGauge(preferredFqn, "1 if Topic/Partition is using the Preferred Broker", replicas.size() > 0 && replicas.get(0).id() == leaderId ? 1 : 0, labelNames, values));
+                            metrics.add(toGauge(underFqn, "1 if Topic/Partition is under Replicated", isrs.size() < replicas.size() ? 1 : 0, labelNames, values));
                         }
                     }
                 }
-                return Arrays.asList(topics, leaders, nReplicas, nIsrs, preferred, under);
+                return metrics;
             });
 
             CompletableFuture<Map<TopicPartition, ListOffsetsResult.ListOffsetsResultInfo>> currentOffsets =
@@ -202,12 +227,14 @@ public class KafkaAsyncCollector implements AsyncCollector {
             CompletableFuture<Collection<String>> groupIdsCF = toCF(groups.apply(admin.listConsumerGroups())).thenApply(this::toGroupIds);
 
             CompletableFuture<Map<String, ConsumerGroupDescription>> cgdMapCF = groupIdsCF.thenCompose(ids -> toCF(admin.describeConsumerGroups(ids).all()));
-            collectSingle(futures, cgdMapCF, map -> {
-                GaugeMetricFamily groups = new GaugeMetricFamily(fqn("consumergroup", "members"), "Amount of members in a consumer group", toLabels("consumergroup"));
+            collectList(futures, cgdMapCF, map -> {
+                List<Meter> metrics = new ArrayList<>();
+                List<String> labelNames = toLabels("consumergroup");
+                String fqn = fqn("consumergroup", "members");
                 for (Map.Entry<String, ConsumerGroupDescription> entry : map.entrySet()) {
-                    groups.addMetric(toValues(entry.getKey()), entry.getValue().members().size());
+                    metrics.add(toGauge(fqn, "Amount of members in a consumer group", entry.getValue().members().size(), labelNames, toValues(entry.getKey())));
                 }
-                return groups;
+                return metrics;
             });
 
             Map<String, Map<TopicPartition, OffsetAndMetadata>> groupOffsetsMap = new ConcurrentHashMap<>();
@@ -224,20 +251,19 @@ public class KafkaAsyncCollector implements AsyncCollector {
                 return toCF(KafkaFuture.allOf(groupOffsetKFs.toArray(new KafkaFuture[0]))).thenCompose(v -> currentOffsets);
             });
             collectList(futures, cgOffsets, map -> {
-                List<Collector.MetricFamilySamples> metrics = new ArrayList<>();
+                List<Meter> metrics = new ArrayList<>();
 
                 if (groupOffsetsMap.isEmpty()) {
                     return metrics;
                 }
 
-                GaugeMetricFamily groupOffsets = new GaugeMetricFamily(fqn("consumergroup", "current_offset"), "Current Offset of a ConsumerGroup at Topic/Partition", toLabels("consumergroup", "topic", "partition"));
-                metrics.add(groupOffsets);
-                GaugeMetricFamily groupOffsetsSum = new GaugeMetricFamily(fqn("consumergroup", "current_offset_sum"), "Current Offset of a ConsumerGroup at Topic for all partitions", toLabels("consumergroup", "topic"));
-                metrics.add(groupOffsetsSum);
-                GaugeMetricFamily groupLags = new GaugeMetricFamily(fqn("consumergroup", "lag"), "Current Approximate Lag of a ConsumerGroup at Topic/Partition", toLabels("consumergroup", "topic", "partition"));
-                metrics.add(groupLags);
-                GaugeMetricFamily groupLagSum = new GaugeMetricFamily(fqn("consumergroup", "lag_sum"), "Current Approximate Lag of a ConsumerGroup at Topic for all partitions", toLabels("consumergroup", "topic"));
-                metrics.add(groupLagSum);
+                List<String> labels2 = toLabels("consumergroup", "topic");
+                List<String> labels3 = toLabels("consumergroup", "topic", "partition");
+
+                String offsetFqn = fqn("consumergroup", "current_offset");
+                String offsetSumFqn = fqn("consumergroup", "current_offset_sum");
+                String lagFqn = fqn("consumergroup", "lag");
+                String lagSumFqn = fqn("consumergroup", "lag_sum");
 
                 for (Map.Entry<String, Map<TopicPartition, OffsetAndMetadata>> entry : groupOffsetsMap.entrySet()) {
                     String group = entry.getKey();
@@ -254,7 +280,7 @@ public class KafkaAsyncCollector implements AsyncCollector {
                             }
                         }
                     }
-                    topicOffsetSum.forEach((t, o) -> groupOffsetsSum.addMetric(toValues(group, t), o));
+                    topicOffsetSum.forEach((t, o) -> metrics.add(toGauge(offsetSumFqn, "Current Offset of a ConsumerGroup at Topic for all partitions", o, labels2, toValues(group, t))));
 
                     Map<String, Long> topicLagSum = new HashMap<>();
                     for (Map.Entry<TopicPartition, OffsetAndMetadata> subEntry : offsetMap.entrySet()) {
@@ -274,12 +300,12 @@ public class KafkaAsyncCollector implements AsyncCollector {
                                 } else {
                                     lag = -1;
                                 }
-                                groupLags.addMetric(toValues(group, topic, String.valueOf(partition)), lag);
+                                metrics.add(toGauge(lagFqn, "Current Approximate Lag of a ConsumerGroup at Topic/Partition", lag, labels3, toValues(group, topic, partition)));
                             }
-                            groupOffsets.addMetric(toValues(group, topic, String.valueOf(partition)), offset);
+                            metrics.add(toGauge(offsetFqn, "Current Offset of a ConsumerGroup at Topic/Partition", offset, labels3, toValues(group, topic, partition)));
                         }
                     }
-                    topicLagSum.forEach((t, l) -> groupLagSum.addMetric(toValues(group, t), l));
+                    topicLagSum.forEach((t, l) -> metrics.add(toGauge(lagSumFqn, "Current Approximate Lag of a ConsumerGroup at Topic for all partitions", l, labels2, toValues(group, t))));
                 }
                 return metrics;
             });
@@ -292,7 +318,7 @@ public class KafkaAsyncCollector implements AsyncCollector {
 
     private CompletableFuture<Map<TopicPartition, ListOffsetsResult.ListOffsetsResultInfo>> offsets(
         Admin admin,
-        List<CompletableFuture<List<Collector.MetricFamilySamples>>> futures,
+        List<CompletableFuture<List<Meter>>> futures,
         String fqn,
         String help,
         CompletableFuture<Map<String, TopicDescription>> descCS,
@@ -307,13 +333,14 @@ public class KafkaAsyncCollector implements AsyncCollector {
             }
             return toCF(admin.listOffsets(currentMap).all());
         });
-        collectSingle(futures, offsetCS, map -> {
-            GaugeMetricFamily partitions = new GaugeMetricFamily(fqn, help, toLabels("partition", "topic"));
+        collectList(futures, offsetCS, map -> {
+            List<Meter> partitions = new ArrayList<>();
+            List<String> labelNames = toLabels("partition", "topic");
             for (Map.Entry<TopicPartition, ListOffsetsResult.ListOffsetsResultInfo> offsetEntry : map.entrySet()) {
                 Number offset = offsetEntry.getValue().offset();
                 String topic = offsetEntry.getKey().topic();
                 int partition = offsetEntry.getKey().partition();
-                partitions.addMetric(toValues(partition, topic), offset.doubleValue());
+                partitions.add(toGauge(fqn, help, offset, labelNames, toValues(partition, topic)));
             }
             return partitions;
         });

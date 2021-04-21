@@ -4,7 +4,7 @@
  */
 package io.strimzi.kafkaexporter.server;
 
-import io.prometheus.client.Collector;
+import io.micrometer.core.instrument.Meter;
 
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -13,6 +13,7 @@ import java.util.concurrent.CompletableFuture;
  * @author Ales Justin
  */
 public interface CollectorResult {
-    CompletableFuture<List<Collector.MetricFamilySamples>> getFuture();
-    List<Collector.MetricFamilySamples> getCompleted();
+    void join(); // wait for the future results to finish
+    CompletableFuture<List<Meter>> getFuture();
+    List<Meter> getCompleted();
 }

@@ -15,8 +15,8 @@ Other config includes (same as kafka_exporter)
     @ConfigProperty(name = "metrics.path", defaultValue = "/metrics")
     String metricsPath;
 
-    @ConfigProperty(name = "prometheus.http.port", defaultValue = "9308")
-    int httpPort;
+    @ConfigProperty(name = "health.path", defaultValue = "/healthz")
+    String healthPath;
 
     @ConfigProperty(name = "refresh.metadata", defaultValue = "PT1M")
     Duration metadataRefreshInterval;
@@ -36,6 +36,8 @@ Other config includes (same as kafka_exporter)
     @ConfigProperty(name = "kafka.labels")
     Optional<String> kafkaLabels;
 ```
+
+To change the http port, simply use Quarkus' `quarkus.http.port` property.
 
 TODO ... more docs
 
