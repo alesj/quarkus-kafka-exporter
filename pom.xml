@@ -28,8 +28,6 @@
         
         <!-- Quarkus Version -->
         <quarkus.version>1.13.1.Final</quarkus.version>
-        <!-- Prometheus Version -->
-        <prometheus.version>0.10.0</prometheus.version>
 
         <!-- Jandex -->
         <jandex.version>1.0.8</jandex.version>
