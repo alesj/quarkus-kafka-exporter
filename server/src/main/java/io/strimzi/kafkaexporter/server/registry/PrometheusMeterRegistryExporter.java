@@ -5,15 +5,13 @@
 package io.strimzi.kafkaexporter.server.registry;
 
 import io.micrometer.core.instrument.Meter;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.composite.CompositeMeterRegistry;
 import io.micrometer.prometheus.PrometheusMeterRegistry;
 import io.prometheus.client.exporter.common.TextFormat;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
-import javax.annotation.PostConstruct;
-import javax.enterprise.inject.Instance;
+import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
-import javax.inject.Singleton;
 import java.io.IOException;
 import java.io.Writer;
 import java.util.List;
@@ -21,35 +19,40 @@ import java.util.List;
 /**
  * @author Ales Justin
  */
-@Singleton
+@ApplicationScoped
 public class PrometheusMeterRegistryExporter implements MeterRegistryExporter {
-    private static final Logger log = LoggerFactory.getLogger(PrometheusMeterRegistryExporter.class);
 
     @Inject
-    Instance<PrometheusMeterRegistry> registries;
+    MeterRegistry registry;
 
-    private PrometheusMeterRegistry registry;
+    private volatile boolean check;
+    private PrometheusMeterRegistry pmr;
 
-    @PostConstruct
-    void init () {
-        if (registries.isUnsatisfied()) {
-            registry = null;
-        } else if (registries.isAmbiguous()) {
-            registry = registries.iterator().next();
-            log.warn("Multiple Prometheus registries present. Using {} with the built-in scrape endpoint", registry);
-        } else {
-            registry = registries.get();
+    private PrometheusMeterRegistry getRegistry() {
+        if (!check) {
+            if (registry instanceof CompositeMeterRegistry) {
+                CompositeMeterRegistry cmr = (CompositeMeterRegistry) registry;
+                pmr = (PrometheusMeterRegistry) cmr.getRegistries()
+                    .stream()
+                    .filter(m -> m instanceof PrometheusMeterRegistry)
+                    .findFirst()
+                    .orElse(null);
+            } else if (registry instanceof PrometheusMeterRegistry) {
+                pmr = (PrometheusMeterRegistry) registry;
+            }
+            check = true;
         }
+        return pmr;
     }
 
     @Override
     public boolean canExport() {
-        return registry != null;
+        return getRegistry() != null;
     }
 
     @Override
     public String scrape(List<Meter> meters, Writer writer) throws IOException {
-        registry.scrape(writer);
+        getRegistry().scrape(writer);
         return TextFormat.CONTENT_TYPE_004;
     }
 }
