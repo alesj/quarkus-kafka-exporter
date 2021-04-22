@@ -65,16 +65,20 @@ public class AsyncMetricsHandler implements Handler<RoutingContext> {
                 .end();
         } else {
             CollectorResult result = collector.collect();
-            result.getFuture().thenAccept(meters -> {
-                final BufferWriter writer = new BufferWriter();
-                try {
-                    String contentType = exporter.export(meters, writer);
-                    ctx.response()
-                        .setStatusCode(HttpURLConnection.HTTP_OK)
-                        .putHeader(VertxConfiguration.CONTENT_TYPE, contentType)
-                        .end(writer.getBuffer());
-                } catch (IOException e) {
-                    ctx.fail(e);
+            result.getFuture().whenComplete((meters, t) -> {
+                if (t != null) {
+                    ctx.fail(t);
+                } else {
+                    final BufferWriter writer = new BufferWriter();
+                    try {
+                        String contentType = exporter.export(meters, writer);
+                        ctx.response()
+                            .setStatusCode(HttpURLConnection.HTTP_OK)
+                            .putHeader(VertxConfiguration.CONTENT_TYPE, contentType)
+                            .end(writer.getBuffer());
+                    } catch (IOException e) {
+                        ctx.fail(e);
+                    }
                 }
             });
         }
