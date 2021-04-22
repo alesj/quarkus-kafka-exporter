@@ -51,7 +51,7 @@ public class PrometheusMeterRegistryExporter implements MeterRegistryExporter {
     }
 
     @Override
-    public String scrape(List<Meter> meters, Writer writer) throws IOException {
+    public String export(List<Meter> meters, Writer writer) throws IOException {
         getRegistry().scrape(writer);
         return TextFormat.CONTENT_TYPE_004;
     }

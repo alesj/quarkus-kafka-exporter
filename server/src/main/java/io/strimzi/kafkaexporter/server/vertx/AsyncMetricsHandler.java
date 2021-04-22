@@ -68,7 +68,7 @@ public class AsyncMetricsHandler implements Handler<RoutingContext> {
             result.getFuture().thenAccept(meters -> {
                 final BufferWriter writer = new BufferWriter();
                 try {
-                    String contentType = exporter.scrape(meters, writer);
+                    String contentType = exporter.export(meters, writer);
                     ctx.response()
                         .setStatusCode(HttpURLConnection.HTTP_OK)
                         .putHeader(VertxConfiguration.CONTENT_TYPE, contentType)

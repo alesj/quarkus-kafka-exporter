@@ -22,12 +22,12 @@ public interface MeterRegistryExporter {
     boolean canExport();
 
     /**
-     * Scrape meters data into writer.
+     * Export meters data into writer.
      *
      * @param meters the collected meters
      * @param writer the write to write to
      * @return content-type
      * @throws IOException for any I/O error
      */
-    String scrape(List<Meter> meters, Writer writer) throws IOException;
+    String export(List<Meter> meters, Writer writer) throws IOException;
 }
