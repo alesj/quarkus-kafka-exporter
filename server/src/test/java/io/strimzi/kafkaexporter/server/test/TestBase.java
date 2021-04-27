@@ -6,6 +6,7 @@ import io.strimzi.kafkaexporter.server.utils.InjectedProperties;
 import io.vertx.core.Vertx;
 import io.vertx.ext.web.client.WebClient;
 import org.apache.kafka.clients.admin.Admin;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.event.Level;
@@ -29,6 +30,9 @@ public class TestBase {
     @Inject
     @InjectedProperties("kafka")
     Properties properties;
+
+    @ConfigProperty(name = "quarkus.http.test-port", defaultValue = "9308")
+    int httpPort;
 
     protected boolean isKafkaRunning() {
         try (AdminHandle adminHandle = adminProvider.getAdminHandle()) {
@@ -67,7 +71,7 @@ public class TestBase {
         try {
             while (retries > 0) {
                 retries--;
-                client.get(9308, "localhost", "/metrics").send(event -> {
+                client.get(httpPort, "localhost", "/metrics").send(event -> {
                     if (event.succeeded()) {
                         logging.log(Level.INFO, "Metrics: \n" + event.result().bodyAsString(), null);
                     } else {
