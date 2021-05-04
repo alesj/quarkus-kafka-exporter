@@ -7,8 +7,10 @@ package io.strimzi.kafkaexporter.server;
 import io.strimzi.kafkaexporter.server.utils.AdminProvider;
 import io.strimzi.kafkaexporter.server.utils.AdminProviderImpl;
 import io.strimzi.kafkaexporter.server.utils.InjectedProperties;
+import io.strimzi.kafkaexporter.server.utils.KafkaUtil;
 import io.strimzi.kafkaexporter.server.utils.PropertiesUtil;
 import org.apache.kafka.clients.admin.AdminClientConfig;
+import org.apache.kafka.common.config.SslConfigs;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 import javax.enterprise.context.ApplicationScoped;
@@ -36,6 +38,11 @@ public class Configuration {
     public AdminProvider createAdmin(@InjectedProperties("kafka") Properties properties) {
         Properties copy = new Properties();
         copy.put(AdminClientConfig.METADATA_MAX_AGE_CONFIG, metadataRefreshInterval.toMillis());
+
+        KafkaUtil.applyContent(properties, SslConfigs.SSL_KEYSTORE_KEY_CONFIG);
+        KafkaUtil.applyContent(properties, SslConfigs.SSL_KEYSTORE_CERTIFICATE_CHAIN_CONFIG);
+        KafkaUtil.applyContent(properties, SslConfigs.SSL_TRUSTSTORE_CERTIFICATES_CONFIG);
+
         copy.putAll(properties);
         return new AdminProviderImpl(copy);
     }
