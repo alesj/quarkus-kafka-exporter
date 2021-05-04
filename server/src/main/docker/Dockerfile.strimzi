@@ -1,0 +1,13 @@
+FROM fabric8/java-alpine-openjdk11-jre
+
+ENV APP_URL="${docker.app.file}"
+ENV JAVA_OPTIONS="-Dquarkus.http.host=0.0.0.0"
+ENV AB_ENABLED=jmx_exporter
+
+ADD "$APP_URL" /deployments
+
+RUN mkdir /deployments/config;
+
+RUN mkdir /opt/kafka-exporter;
+ADD kafka_exporter_run.sh /opt/kafka-exporter/
+RUN chmod +x /opt/kafka-exporter/kafka_exporter_run.sh
