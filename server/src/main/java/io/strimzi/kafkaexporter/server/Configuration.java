@@ -21,7 +21,7 @@ import javax.enterprise.inject.spi.InjectionPoint;
 import java.time.Duration;
 import java.util.Properties;
 import java.util.concurrent.Executor;
-import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.Executors;
 
 /**
  * @author Ales Justin
@@ -31,10 +31,13 @@ public class Configuration {
     @ConfigProperty(name = "refresh.metadata", defaultValue = "PT1M")
     Duration metadataRefreshInterval;
 
+    @ConfigProperty(name = "thread.pool.size", defaultValue = "2")
+    int threadPoolSize;
+
     @Produces
     @ApplicationScoped
     public Executor executor() {
-        Executor executor = ForkJoinPool.commonPool();
+        Executor executor = Executors.newFixedThreadPool(threadPoolSize);
         return new SmartExecutor(executor);
     }
 

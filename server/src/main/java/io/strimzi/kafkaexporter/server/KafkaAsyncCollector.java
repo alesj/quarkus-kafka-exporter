@@ -5,13 +5,15 @@
 package io.strimzi.kafkaexporter.server;
 
 import io.micrometer.core.instrument.Gauge;
-import io.micrometer.core.instrument.ImmutableTag;
 import io.micrometer.core.instrument.Meter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tag;
 import io.strimzi.kafkaexporter.server.utils.AdminHandle;
 import io.strimzi.kafkaexporter.server.utils.AdminProvider;
 import io.strimzi.kafkaexporter.server.utils.Groups;
+import io.strimzi.kafkaexporter.server.utils.MeterKey;
+import io.strimzi.kafkaexporter.server.utils.MeterTuple;
+import io.strimzi.kafkaexporter.server.utils.MutableSupplier;
 import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.ConsumerGroupDescription;
 import org.apache.kafka.clients.admin.ConsumerGroupListing;
@@ -70,6 +72,8 @@ public class KafkaAsyncCollector implements AsyncCollector {
 
     private Map<String, String> labels;
 
+    private final Map<MeterKey, MeterTuple> metrics = new ConcurrentHashMap<>();
+
     @Inject
     AdminProvider adminProvider;
 
@@ -98,7 +102,7 @@ public class KafkaAsyncCollector implements AsyncCollector {
         return labels;
     }
 
-    private Iterable<Tag> tags(List<String> labels, List<Object> values) {
+    private List<Tag> tags(List<String> labels, List<Object> values) {
         if (labels.size() != values.size()) {
             throw new IllegalArgumentException("Labels and values size are not equal!");
         }
@@ -109,7 +113,7 @@ public class KafkaAsyncCollector implements AsyncCollector {
         return tags
             .entrySet()
             .stream()
-            .map(e -> new ImmutableTag(e.getKey(), e.getValue()))
+            .map(e -> Tag.of(e.getKey(), e.getValue()))
             .collect(Collectors.toList());
     }
 
@@ -147,10 +151,18 @@ public class KafkaAsyncCollector implements AsyncCollector {
     }
 
     private Meter toGauge(String fqn, String help, Number value, List<String> labels, List<Object> values) {
-        return Gauge.builder(fqn, value, Number::doubleValue)
-            .description(help)
-            .tags(tags(labels, values))
-            .register(registry);
+        List<Tag> tags = tags(labels, values);
+        MeterKey key = new MeterKey(fqn, tags);
+        MeterTuple mt = metrics.computeIfAbsent(key, mk -> {
+            MutableSupplier supplier = new MutableSupplier(value);
+            Gauge gauge = Gauge.builder(fqn, supplier)
+                .description(help)
+                .tags(tags)
+                .register(registry);
+            return new MeterTuple(supplier, gauge);
+        });
+        mt.getSupplier().accept(value);
+        return mt.getMeter();
     }
 
     private <T> void collectNumber(List<CompletableFuture<List<Meter>>> tasks, String fqn, String help, CompletableFuture<T> cf, Function<T, Number> fn) {
