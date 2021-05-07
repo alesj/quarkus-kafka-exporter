@@ -9,19 +9,22 @@ import io.micrometer.core.instrument.Meter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Consumer;
 
 /**
  * @author Ales Justin
  */
 public class CollectorResultImpl implements CollectorResult {
+    private final Consumer<Void> finalizer;
     private final List<CompletableFuture<List<Meter>>> futures;
 
-    public CollectorResultImpl(List<CompletableFuture<List<Meter>>> futures) {
+    public CollectorResultImpl(Consumer<Void> finalizer, List<CompletableFuture<List<Meter>>> futures) {
+        this.finalizer = finalizer;
         this.futures = futures;
     }
 
     private CompletableFuture<Void> allOf() {
-        return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
+        return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).thenAccept(finalizer);
     }
 
     private List<Meter> getMeters() {

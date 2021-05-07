@@ -47,4 +47,12 @@ public class MeterKey {
     public int hashCode() {
         return Objects.hash(fqn, tags);
     }
+
+    @Override
+    public String toString() {
+        return "MeterKey{" +
+            "fqn='" + fqn + '\'' +
+            ", tags=" + tags +
+            '}';
+    }
 }

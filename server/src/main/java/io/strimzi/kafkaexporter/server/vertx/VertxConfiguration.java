@@ -62,7 +62,7 @@ public class VertxConfiguration {
             scheduler = Executors.newSingleThreadScheduledExecutor();
             long delay = initialDelay.orElse(Duration.ZERO).toMillis();
             long period = metricsPeriod.toMillis();
-            scheduler.scheduleAtFixedRate(() -> collector.collect(), delay, period, TimeUnit.MILLISECONDS);
+            scheduler.scheduleAtFixedRate(() -> collector.collect().join(), delay, period, TimeUnit.MILLISECONDS);
         }
     }
 

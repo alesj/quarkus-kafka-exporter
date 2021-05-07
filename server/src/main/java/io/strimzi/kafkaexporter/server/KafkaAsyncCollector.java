@@ -54,6 +54,7 @@ import static io.strimzi.kafkaexporter.server.utils.KafkaUtil.toCF;
  */
 @ApplicationScoped
 public class KafkaAsyncCollector implements AsyncCollector {
+    private static final Object OBJ = new Object();
 
     @ConfigProperty(name = "namespace", defaultValue = "kafka")
     String namespace;
@@ -150,9 +151,10 @@ public class KafkaAsyncCollector implements AsyncCollector {
             .collect(Collectors.toSet());
     }
 
-    private Meter toGauge(String fqn, String help, Number value, List<String> labels, List<Object> values) {
+    private Meter toGauge(Map<MeterKey, Object> keys, String fqn, String help, Number value, List<String> labels, List<Object> values) {
         List<Tag> tags = tags(labels, values);
         MeterKey key = new MeterKey(fqn, tags);
+        keys.put(key, OBJ); // used
         MeterTuple mt = metrics.computeIfAbsent(key, mk -> {
             MutableSupplier supplier = new MutableSupplier(value);
             Gauge gauge = Gauge.builder(fqn, supplier)
@@ -165,10 +167,10 @@ public class KafkaAsyncCollector implements AsyncCollector {
         return mt.getMeter();
     }
 
-    private <T> void collectNumber(List<CompletableFuture<List<Meter>>> tasks, String fqn, String help, CompletableFuture<T> cf, Function<T, Number> fn) {
+    private <T> void collectNumber(Map<MeterKey, Object> keys, List<CompletableFuture<List<Meter>>> tasks, String fqn, String help, CompletableFuture<T> cf, Function<T, Number> fn) {
         collectSingle(tasks, cf, r -> {
             Number value = fn.apply(r);
-            return toGauge(fqn, help, value, toLabels(), toValues());
+            return toGauge(keys, fqn, help, value, toLabels(), toValues());
         });
     }
 
@@ -185,9 +187,13 @@ public class KafkaAsyncCollector implements AsyncCollector {
     public CollectorResult collect() {
         try (AdminHandle adminHandle = adminProvider.getAdminHandle()) {
             Admin admin = adminHandle.getAdmin();
+
+            Map<MeterKey, MeterTuple> snapshot = new HashMap<>(metrics);
+            Map<MeterKey, Object> keys = new ConcurrentHashMap<>();
+
             List<CompletableFuture<List<Meter>>> futures = new ArrayList<>();
 
-            collectNumber(futures, fqn(null, "brokers"), "Number of Brokers in the Kafka Cluster.", toCF(admin.describeCluster().nodes()), Collection::size);
+            collectNumber(keys, futures, fqn(null, "brokers"), "Number of Brokers in the Kafka Cluster.", toCF(admin.describeCluster().nodes()), Collection::size);
 
             CompletableFuture<Set<String>> topicsCS = toCF(admin.listTopics(new ListTopicsOptions().listInternal(true)).names());
 
@@ -212,24 +218,24 @@ public class KafkaAsyncCollector implements AsyncCollector {
                     TopicDescription td = entry.getValue();
                     List<TopicPartitionInfo> partitions = td.partitions();
 
-                    metrics.add(toGauge(partitionsFqn, "Number of partitions for this Topic", partitions.size(), toLabels("topic"), toValues(topic)));
+                    metrics.add(toGauge(keys, partitionsFqn, "Number of partitions for this Topic", partitions.size(), toLabels("topic"), toValues(topic)));
 
                     for (TopicPartitionInfo tpi : partitions) {
                         Integer partition = tpi.partition();
                         List<Object> values = toValues(partition, topic);
 
                         List<Node> replicas = tpi.replicas();
-                        metrics.add(toGauge(replicasFqn, "Number of Replicas for this Topic/Partition", replicas.size(), labelNames, values));
+                        metrics.add(toGauge(keys, replicasFqn, "Number of Replicas for this Topic/Partition", replicas.size(), labelNames, values));
 
                         List<Node> isrs = tpi.isr();
-                        metrics.add(toGauge(isrsFqn, "Number of In-Sync Replicas for this Topic/Partition", isrs.size(), labelNames, values));
+                        metrics.add(toGauge(keys, isrsFqn, "Number of In-Sync Replicas for this Topic/Partition", isrs.size(), labelNames, values));
 
                         Node leader = tpi.leader();
                         if (leader != null) {
                             int leaderId = leader.id();
-                            metrics.add(toGauge(leaderFqn, "Leader Broker ID of this Topic/Partition", leaderId, labelNames, values));
-                            metrics.add(toGauge(preferredFqn, "1 if Topic/Partition is using the Preferred Broker", replicas.size() > 0 && replicas.get(0).id() == leaderId ? 1 : 0, labelNames, values));
-                            metrics.add(toGauge(underFqn, "1 if Topic/Partition is under Replicated", isrs.size() < replicas.size() ? 1 : 0, labelNames, values));
+                            metrics.add(toGauge(keys, leaderFqn, "Leader Broker ID of this Topic/Partition", leaderId, labelNames, values));
+                            metrics.add(toGauge(keys, preferredFqn, "1 if Topic/Partition is using the Preferred Broker", replicas.size() > 0 && replicas.get(0).id() == leaderId ? 1 : 0, labelNames, values));
+                            metrics.add(toGauge(keys, underFqn, "1 if Topic/Partition is under Replicated", isrs.size() < replicas.size() ? 1 : 0, labelNames, values));
                         }
                     }
                 }
@@ -237,8 +243,8 @@ public class KafkaAsyncCollector implements AsyncCollector {
             });
 
             CompletableFuture<Map<TopicPartition, ListOffsetsResult.ListOffsetsResultInfo>> currentOffsets =
-                offsets(admin, futures, fqn("topic", "partition_current_offset"), "Current Offset of a Broker at Topic/Partition", descCS, OffsetSpec.latest());
-            offsets(admin, futures, fqn("topic", "partition_oldest_offset"), "Oldest Offset of a Broker at Topic/Partition", descCS, OffsetSpec.earliest());
+                offsets(admin, keys, futures, fqn("topic", "partition_current_offset"), "Current Offset of a Broker at Topic/Partition", descCS, OffsetSpec.latest());
+            offsets(admin, keys, futures, fqn("topic", "partition_oldest_offset"), "Oldest Offset of a Broker at Topic/Partition", descCS, OffsetSpec.earliest());
 
             CompletableFuture<Collection<String>> groupIdsCF = toCF(groups.apply(admin.listConsumerGroups())).thenApplyAsync(this::toGroupIds, executor);
 
@@ -248,7 +254,7 @@ public class KafkaAsyncCollector implements AsyncCollector {
                 List<String> labelNames = toLabels("consumergroup");
                 String fqn = fqn("consumergroup", "members");
                 for (Map.Entry<String, ConsumerGroupDescription> entry : map.entrySet()) {
-                    metrics.add(toGauge(fqn, "Amount of members in a consumer group", entry.getValue().members().size(), labelNames, toValues(entry.getKey())));
+                    metrics.add(toGauge(keys, fqn, "Amount of members in a consumer group", entry.getValue().members().size(), labelNames, toValues(entry.getKey())));
                 }
                 return metrics;
             });
@@ -296,7 +302,7 @@ public class KafkaAsyncCollector implements AsyncCollector {
                             }
                         }
                     }
-                    topicOffsetSum.forEach((t, o) -> metrics.add(toGauge(offsetSumFqn, "Current Offset of a ConsumerGroup at Topic for all partitions", o, labels2, toValues(group, t))));
+                    topicOffsetSum.forEach((t, o) -> metrics.add(toGauge(keys, offsetSumFqn, "Current Offset of a ConsumerGroup at Topic for all partitions", o, labels2, toValues(group, t))));
 
                     Map<String, Long> topicLagSum = new HashMap<>();
                     for (Map.Entry<TopicPartition, OffsetAndMetadata> subEntry : offsetMap.entrySet()) {
@@ -316,17 +322,22 @@ public class KafkaAsyncCollector implements AsyncCollector {
                                 } else {
                                     lag = -1;
                                 }
-                                metrics.add(toGauge(lagFqn, "Current Approximate Lag of a ConsumerGroup at Topic/Partition", lag, labels3, toValues(group, topic, partition)));
+                                metrics.add(toGauge(keys, lagFqn, "Current Approximate Lag of a ConsumerGroup at Topic/Partition", lag, labels3, toValues(group, topic, partition)));
                             }
-                            metrics.add(toGauge(offsetFqn, "Current Offset of a ConsumerGroup at Topic/Partition", offset, labels3, toValues(group, topic, partition)));
+                            metrics.add(toGauge(keys, offsetFqn, "Current Offset of a ConsumerGroup at Topic/Partition", offset, labels3, toValues(group, topic, partition)));
                         }
                     }
-                    topicLagSum.forEach((t, l) -> metrics.add(toGauge(lagSumFqn, "Current Approximate Lag of a ConsumerGroup at Topic for all partitions", l, labels2, toValues(group, t))));
+                    topicLagSum.forEach((t, l) -> metrics.add(toGauge(keys, lagSumFqn, "Current Approximate Lag of a ConsumerGroup at Topic for all partitions", l, labels2, toValues(group, t))));
                 }
                 return metrics;
             });
-
-            return new CollectorResultImpl(futures);
+            return new CollectorResultImpl(
+                v -> {
+                    snapshot.keySet().removeAll(keys.keySet());
+                    snapshot.values().forEach(mt -> registry.remove(mt.getMeter()));
+                },
+                futures
+            );
         } catch (Exception e) {
             throw new IllegalStateException(e);
         }
@@ -334,6 +345,7 @@ public class KafkaAsyncCollector implements AsyncCollector {
 
     private CompletableFuture<Map<TopicPartition, ListOffsetsResult.ListOffsetsResultInfo>> offsets(
         Admin admin,
+        Map<MeterKey, Object> keys,
         List<CompletableFuture<List<Meter>>> futures,
         String fqn,
         String help,
@@ -356,7 +368,7 @@ public class KafkaAsyncCollector implements AsyncCollector {
                 Number offset = offsetEntry.getValue().offset();
                 String topic = offsetEntry.getKey().topic();
                 int partition = offsetEntry.getKey().partition();
-                partitions.add(toGauge(fqn, help, offset, labelNames, toValues(partition, topic)));
+                partitions.add(toGauge(keys, fqn, help, offset, labelNames, toValues(partition, topic)));
             }
             return partitions;
         });
