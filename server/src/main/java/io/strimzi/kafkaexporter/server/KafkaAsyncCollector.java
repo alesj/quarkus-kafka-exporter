@@ -27,6 +27,8 @@ import org.apache.kafka.common.Node;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.TopicPartitionInfo;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
@@ -54,6 +56,8 @@ import static io.strimzi.kafkaexporter.server.utils.KafkaUtil.toCF;
  */
 @ApplicationScoped
 public class KafkaAsyncCollector implements AsyncCollector {
+    private static Logger log = LoggerFactory.getLogger(KafkaAsyncCollector.class);
+
     private static final Object OBJ = new Object();
 
     @ConfigProperty(name = "namespace", defaultValue = "kafka")
@@ -332,9 +336,14 @@ public class KafkaAsyncCollector implements AsyncCollector {
                 return metrics;
             });
             return new CollectorResultImpl(
-                v -> {
+                (v, t) -> {
+                    // remove unused from registry
                     snapshot.keySet().removeAll(keys.keySet());
                     snapshot.values().forEach(mt -> registry.remove(mt.getMeter()));
+
+                    if (t != null) {
+                        log.warn("Error while collecting metrics, not all could (probably) be collected.", t);
+                    }
                 },
                 futures
             );
