@@ -27,7 +27,7 @@
         <tar.long.file.mode>gnu</tar.long.file.mode>
         
         <!-- Quarkus Version -->
-        <quarkus.version>2.0.0.Alpha1</quarkus.version>
+        <quarkus.version>2.0.0.Alpha2</quarkus.version>
 
         <!-- Jandex -->
         <jandex.version>1.0.8</jandex.version>
@@ -93,6 +93,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
+                <version>${version.compiler.plugin}</version>
                 <configuration>
                     <source>${maven.compiler.target}</source>
                     <target>${maven.compiler.target}</target>

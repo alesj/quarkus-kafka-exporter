@@ -40,6 +40,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executor;
 import java.util.function.Function;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -74,6 +75,9 @@ public class KafkaAsyncCollector implements AsyncCollector {
 
     @Inject
     MeterRegistry registry;
+
+    @Inject
+    Executor executor;
 
     private synchronized Map<String, String> getLabels() {
         if (labels == null) {
@@ -161,7 +165,7 @@ public class KafkaAsyncCollector implements AsyncCollector {
     }
 
     private <T> void collectList(List<CompletableFuture<List<Meter>>> tasks, CompletableFuture<T> cf, Function<T, List<Meter>> fn) {
-        CompletableFuture<List<Meter>> task = cf.thenApply(fn);
+        CompletableFuture<List<Meter>> task = cf.thenApplyAsync(fn, executor);
         tasks.add(task);
     }
 
@@ -175,7 +179,7 @@ public class KafkaAsyncCollector implements AsyncCollector {
 
             CompletableFuture<Set<String>> topicsCS = toCF(admin.listTopics(new ListTopicsOptions().listInternal(true)).names());
 
-            CompletableFuture<Map<String, TopicDescription>> descCS = topicsCS.thenCompose(topics -> toCF(admin.describeTopics(filterTopics(topics)).all()));
+            CompletableFuture<Map<String, TopicDescription>> descCS = topicsCS.thenComposeAsync(topics -> toCF(admin.describeTopics(filterTopics(topics)).all()), executor);
             collectList(futures, descCS, map -> {
                 if (map.isEmpty()) {
                     return Collections.emptyList();
@@ -224,9 +228,9 @@ public class KafkaAsyncCollector implements AsyncCollector {
                 offsets(admin, futures, fqn("topic", "partition_current_offset"), "Current Offset of a Broker at Topic/Partition", descCS, OffsetSpec.latest());
             offsets(admin, futures, fqn("topic", "partition_oldest_offset"), "Oldest Offset of a Broker at Topic/Partition", descCS, OffsetSpec.earliest());
 
-            CompletableFuture<Collection<String>> groupIdsCF = toCF(groups.apply(admin.listConsumerGroups())).thenApply(this::toGroupIds);
+            CompletableFuture<Collection<String>> groupIdsCF = toCF(groups.apply(admin.listConsumerGroups())).thenApplyAsync(this::toGroupIds, executor);
 
-            CompletableFuture<Map<String, ConsumerGroupDescription>> cgdMapCF = groupIdsCF.thenCompose(ids -> toCF(admin.describeConsumerGroups(ids).all()));
+            CompletableFuture<Map<String, ConsumerGroupDescription>> cgdMapCF = groupIdsCF.thenComposeAsync(ids -> toCF(admin.describeConsumerGroups(ids).all()), executor);
             collectList(futures, cgdMapCF, map -> {
                 List<Meter> metrics = new ArrayList<>();
                 List<String> labelNames = toLabels("consumergroup");
@@ -248,8 +252,8 @@ public class KafkaAsyncCollector implements AsyncCollector {
                         });
                     groupOffsetKFs.add(gKF);
                 }
-                return toCF(KafkaFuture.allOf(groupOffsetKFs.toArray(new KafkaFuture[0]))).thenCompose(v -> currentOffsets);
-            });
+                return toCF(KafkaFuture.allOf(groupOffsetKFs.toArray(new KafkaFuture[0]))).thenComposeAsync(v -> currentOffsets, executor);
+            }, executor);
             collectList(futures, cgOffsets, map -> {
                 List<Meter> metrics = new ArrayList<>();
 
@@ -324,7 +328,7 @@ public class KafkaAsyncCollector implements AsyncCollector {
         CompletableFuture<Map<String, TopicDescription>> descCS,
         OffsetSpec spec
     ) {
-        CompletableFuture<Map<TopicPartition, ListOffsetsResult.ListOffsetsResultInfo>> offsetCS = descCS.thenCompose(map -> {
+        CompletableFuture<Map<TopicPartition, ListOffsetsResult.ListOffsetsResultInfo>> offsetCS = descCS.thenComposeAsync(map -> {
             Map<TopicPartition, OffsetSpec> currentMap = new HashMap<>();
             for (TopicDescription td : map.values()) {
                 for (TopicPartitionInfo tpi : td.partitions()) {
@@ -332,7 +336,7 @@ public class KafkaAsyncCollector implements AsyncCollector {
                 }
             }
             return toCF(admin.listOffsets(currentMap).all());
-        });
+        }, executor);
         collectList(futures, offsetCS, map -> {
             List<Meter> partitions = new ArrayList<>();
             List<String> labelNames = toLabels("partition", "topic");

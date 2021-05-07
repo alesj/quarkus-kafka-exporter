@@ -9,6 +9,7 @@ import io.strimzi.kafkaexporter.server.utils.AdminProviderImpl;
 import io.strimzi.kafkaexporter.server.utils.InjectedProperties;
 import io.strimzi.kafkaexporter.server.utils.KafkaUtil;
 import io.strimzi.kafkaexporter.server.utils.PropertiesUtil;
+import io.strimzi.kafkaexporter.server.utils.SmartExecutor;
 import org.apache.kafka.clients.admin.AdminClientConfig;
 import org.apache.kafka.common.config.SslConfigs;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -19,6 +20,8 @@ import javax.enterprise.inject.Produces;
 import javax.enterprise.inject.spi.InjectionPoint;
 import java.time.Duration;
 import java.util.Properties;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ForkJoinPool;
 
 /**
  * @author Ales Justin
@@ -27,6 +30,13 @@ public class Configuration {
 
     @ConfigProperty(name = "refresh.metadata", defaultValue = "PT1M")
     Duration metadataRefreshInterval;
+
+    @Produces
+    @ApplicationScoped
+    public Executor executor() {
+        Executor executor = ForkJoinPool.commonPool();
+        return new SmartExecutor(executor);
+    }
 
     @Produces
     public Properties properties(InjectionPoint ip) {
