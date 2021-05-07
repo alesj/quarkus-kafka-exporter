@@ -76,7 +76,7 @@ public class VertxConfiguration {
         log.info("Adding custom metrics paths ...");
         router.get("/").handler(new IndexHandler(metricsPath));
         Handler<RoutingContext> handler = useScheduledMetrics() ?
-            new ScheduledMetricsHandler(exporter) :
+            new MetricsHandler(exporter) :
             new AsyncMetricsHandler(exporter, collector);
         router.route(metricsPath).handler(handler);
         router.route(healthPath).handler(routingContext -> {

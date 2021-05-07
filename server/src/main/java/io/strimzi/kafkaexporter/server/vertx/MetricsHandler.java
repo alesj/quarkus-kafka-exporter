@@ -14,8 +14,8 @@ import java.util.Collections;
 /**
  * @author Ales Justin
  */
-public class ScheduledMetricsHandler extends AbstractMetricsHandler {
-    public ScheduledMetricsHandler(MeterRegistryExporter exporter) {
+public class MetricsHandler extends AbstractMetricsHandler {
+    public MetricsHandler(MeterRegistryExporter exporter) {
         super(exporter, null);
     }
 
