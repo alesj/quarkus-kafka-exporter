@@ -73,9 +73,10 @@ public class VertxConfiguration {
     }
 
     public void init(@Observes Router router) {
-        log.info("Adding custom metrics paths ...");
+        boolean useScheduledMetrics = useScheduledMetrics();
+        log.info("Adding custom metrics paths '{}', scheduled collect '{}' ...", metricsPath, useScheduledMetrics);
         router.get("/").handler(new IndexHandler(metricsPath));
-        Handler<RoutingContext> handler = useScheduledMetrics() ?
+        Handler<RoutingContext> handler = useScheduledMetrics ?
             new MetricsHandler(exporter) :
             new AsyncMetricsHandler(exporter, collector);
         router.route(metricsPath).handler(handler);
