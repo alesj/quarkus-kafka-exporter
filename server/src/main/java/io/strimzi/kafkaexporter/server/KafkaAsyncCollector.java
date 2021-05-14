@@ -151,8 +151,7 @@ public class KafkaAsyncCollector implements AsyncCollector {
                 .register(registry);
             return new MeterTuple(supplier, gauge);
         });
-        mt.getSupplier().accept(value);
-        return mt.getMeter();
+        return mt.apply(value);
     }
 
     private <T> void collectNumber(Set<Meter.Id> keys, List<CompletableFuture<List<Meter>>> tasks, String fqn, String help, CompletableFuture<T> cf, Function<T, Number> fn) {

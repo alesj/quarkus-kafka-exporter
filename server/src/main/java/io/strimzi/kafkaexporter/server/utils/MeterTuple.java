@@ -6,10 +6,12 @@ package io.strimzi.kafkaexporter.server.utils;
 
 import io.micrometer.core.instrument.Meter;
 
+import java.util.function.Function;
+
 /**
  * @author Ales Justin
  */
-public class MeterTuple {
+public class MeterTuple implements Function<Number, Meter> {
     private final MutableSupplier supplier;
     private final Meter meter;
 
@@ -18,11 +20,9 @@ public class MeterTuple {
         this.meter = meter;
     }
 
-    public MutableSupplier getSupplier() {
-        return supplier;
-    }
-
-    public Meter getMeter() {
+    @Override
+    public Meter apply(Number number) {
+        supplier.accept(number);
         return meter;
     }
 }
