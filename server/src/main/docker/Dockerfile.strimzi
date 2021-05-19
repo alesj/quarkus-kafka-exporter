@@ -6,8 +6,6 @@ ENV AB_ENABLED=jmx_exporter
 
 ADD "$APP_URL" /deployments
 
-RUN mkdir /deployments/config;
-
 RUN mkdir /opt/kafka-exporter;
 ADD kafka_exporter_run.sh /opt/kafka-exporter/
 RUN chmod +x /opt/kafka-exporter/kafka_exporter_run.sh
