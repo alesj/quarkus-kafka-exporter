@@ -20,8 +20,6 @@ public abstract class AbstractMetricsHandler implements Handler<RoutingContext> 
     /**
      /**
      * Wrap a Vert.x Buffer as a Writer so it can be used with TextFormat writer
-     *
-     * @author Ales Justin
      */
     static class BufferWriter extends Writer {
 

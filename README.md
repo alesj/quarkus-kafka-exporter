@@ -59,8 +59,12 @@ docker run --rm -it --entrypoint=/bin/sh  strimzi/kafka-exporter-server:latest
 
 ## Native
 
-mvn clean install -DskipTests -Dquarkus.container-image.build=true -Pnative
+mvn clean install -DskipTests quarkus.native.container-build=true -Dquarkus.container-image.build=true -Pnative
+
+(skip `quarkus.native.container-build=true` to run native locally, e.g. OSX)
 
 cd server
 
-docker build -f src/main/docker/Dockerfile.native -t docker.io/strimzi/kafka-exporter-server:latest .
+docker build -f src/main/docker/Dockerfile.native -t docker.io/alesj/kafka-exporter-server:native .
+
+docker build -f src/main/docker/Dockerfile.strimzi-native -t docker.io/alesj/kafka-exporter-server:strimzi-native .  

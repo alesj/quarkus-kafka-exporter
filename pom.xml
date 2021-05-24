@@ -23,9 +23,6 @@
         <maven.compiler.source>11</maven.compiler.source>
         <maven.compiler.target>11</maven.compiler.target>
 
-        <docker.tag.name>latest-release</docker.tag.name>
-        <tar.long.file.mode>gnu</tar.long.file.mode>
-        
         <!-- Quarkus Version -->
         <quarkus.version>2.0.0.Alpha2</quarkus.version>
 
