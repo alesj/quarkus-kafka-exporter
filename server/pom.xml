@@ -37,6 +37,11 @@
             <artifactId>microprofile-config-api</artifactId>
         </dependency>
 
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-kafka-client</artifactId>
+        </dependency>
+
         <!-- Tests -->
 
         <dependency>
