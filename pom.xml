@@ -24,10 +24,10 @@
         <maven.compiler.target>11</maven.compiler.target>
 
         <!-- Quarkus Version -->
-        <quarkus.version>2.0.0.Final</quarkus.version>
+        <quarkus.version>2.3.0.Final</quarkus.version>
 
         <!-- Jandex -->
-        <jandex.version>1.0.8</jandex.version>
+        <jandex.version>1.2.1</jandex.version>
 
         <!-- Plugin Versions -->
         <version.compiler.plugin>3.8.1</version.compiler.plugin>
